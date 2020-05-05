@@ -191,7 +191,7 @@ for filename in os.listdir(stock_data_dir):
         merged_avg_billing_df.rename(columns={'mean': 'avg_billing'}, inplace=True)
         final_summ_file = merged_avg_billing_df
 
-        #create tem purchase dataframe to store running week's data
+        # create tem purchase dataframe to store running week's data
         purchase_temp_df_date_range = all_purchase[
             (all_purchase['Posting Date'] > file_week) & (all_purchase['Posting Date'] <= end_date)]
         purchase_quantitydf = purchase_temp_df_date_range.groupby(["Item No_", "Location Code"])['Quantity'].agg(['sum'])
@@ -202,7 +202,7 @@ for filename in os.listdir(stock_data_dir):
         merged_purchase_quantity_df.rename(columns={'sum': 'purchase_quantity'}, inplace=True)
         final_summ_file = merged_purchase_quantity_df
 
-        #print(final_summ_file.columns)
+        # print(final_summ_file.columns)
         # Replace NaN with 0
         final_summ_file[['sales_quantity','days_to_sell','avg_billing','purchase_quantity','stock_quantity']] = \
             final_summ_file[['sales_quantity','days_to_sell','avg_billing','purchase_quantity','stock_quantity']].fillna(0)
@@ -213,7 +213,7 @@ for filename in os.listdir(stock_data_dir):
 
         ##### Append the data in the final file.
         final_summ_file.to_csv(data_dir + final_file, index=False, mode='a', header=False)
-        #if file_cnt == 30:
+        # if file_cnt == 30:
         #    break
 
 print("Total Files Processed : ", str(file_cnt))
