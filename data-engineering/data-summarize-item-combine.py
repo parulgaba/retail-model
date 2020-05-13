@@ -6,7 +6,7 @@ from datetime import datetime, date, time, timedelta
 
 #Define you directory #Replace your data directory
 data_dir = '/Users/nirajkulkarni/Desktop/Niraj/ISB-CBA/Capstone/data/'
-final_file = 'summarized_data.csv'
+final_file = 'summarized_data_new.csv'
 """
 d1=store master
 d2=Item Master
@@ -95,7 +95,11 @@ for filename in os.listdir(stock_data_dir):
 
         file_cnt = file_cnt + 1
         print("####  Running for  " + filename + "  ####")
-        d3 = pd.read_excel(data_dir + 'weekly-closing-stock/' + filename)
+        try:
+            d3 =  pd.read_excel(data_dir + 'weekly-closing-stock/' + filename)
+        except:
+            print("Error for file : " + str(filename))
+            continue
 
         print("File Count : " + str(file_cnt))
 
@@ -197,7 +201,7 @@ for filename in os.listdir(stock_data_dir):
         ### RUNNING FOR SALES MERGING NOW ######
         #corporate sales indicator
         find_corp_salesdf = final_summ_file.merge(temp_df_date_range[['Store No', 'Item No', 'sales_qty_for_corp']],
-                                                  how='inner',
+                                                  how='left',
                                                   left_on=["Location Code", "Item No"],
                                                   right_on=["Store No", "Item No"],
                                                   suffixes=('_x', '_y'))  # , indicator= True)
@@ -268,8 +272,7 @@ for filename in os.listdir(stock_data_dir):
         ##### Append the data in the final file.
         final_summ_file.to_csv(data_dir + final_file, index=False, mode='a', header=False)
 
-        #if file_cnt >= 2:
+        #if file_cnt >= 1:
         #    break
 
 print("Total Files Processed : ", str(file_cnt))
-
