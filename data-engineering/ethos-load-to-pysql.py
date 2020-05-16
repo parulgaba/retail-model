@@ -204,7 +204,7 @@ from purchase_raw
 purchase_table = sqlContext.sql(purchase_sql)
 purchase_table.createOrReplaceTempView("purchase")
 
-transfer_sql = """select `Store Out` store_out, to_date(`Store Out Date`, 'yyyy/MM/dd') store_out_date, `Store In` store_in, to_date(`Store In Date`, 'yyyy/MM/dd') store_in_date, `Item No_` item_no, `Brand` brand, `Product Group Code` product_group_code, `Quantity` quantity, `Cost Amount` cost_amount, `MRP` mrp, `Purchase Date` purchase_date, `State` state, `Region` region from transfer_raw"""
+transfer_sql = """select `Store Out` store_out, to_date(`Store Out Date`, 'yyyy/MM/dd') store_out_date, `Store In` store_in, to_date(`Store In Date`, 'yyyy/MM/dd') store_in_date, `Item No_` item_no, `Brand` brand, `Product Group Code` product_group_code, `Quantity` quantity, `Cost Amount` cost_amount, float(MRP) mrp, to_date(`Purchase Date`, 'yyyy/MM/dd') purchase_date, `State` state, `Region` region from transfer_raw"""
 
 transfer_table = sqlContext.sql(transfer_sql)
 transfer_table.createOrReplaceTempView("transfer")
@@ -223,7 +223,7 @@ sales_join_data_query = '''SELECT
      a.state state,
      a.region region,
     first(b.sales_department) sales_department,
-    mean(DATDIFF(b.sales_date - a.closing_date)) days_to_sell,
+    mean(DATEDIFF(b.sales_date, a.closing_date)) days_to_sell,
     sum(b.customer_no) num_of_customers,
     sum(b.quantity) sales_quantity,
     sum(b.price) sales_price,
@@ -260,6 +260,7 @@ SELECT
      a.purchase_mrp purchase_mrp,
      a.stock_prevailing_mrp stock_prevailing_mrp,
      a.purchase_date purchase_date,
+     a.days_to_sell days_to_sell,
      a.state state,
      a.region region,
      a.sales_department,
@@ -285,7 +286,7 @@ ON a.location_code = b.location_code
 AND a.item_no = b.item_no
 AND b.posting_date > a.closing_date
 AND b.posting_date <= date_add(a.closing_date, 7)
-GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27
+GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28
 """
 purchase_join = sqlContext.sql(purchase_join_query)
 purchase_join.createOrReplaceTempView("purchase_join")
@@ -306,24 +307,24 @@ SELECT
      a.purchase_date purchase_date,
      a.state state,
      a.region region,
-     a.sales_department,
-     a.num_of_customers,
-    a.sales_quantity,
-    a.sales_price,
-    a.sales_total_price,
-    a.total_line_discount,
-    a.total_crm_line_discount,
-    a.total_discount,
-    a.total_tax,
-    a.total_cost,
-    a.total_billing,
-    a.contribution,
-    a.total_trade_incentive,
-    a.total_trade_incentive_value,
-    a.total_contribution,
-    a.total_purchase_quantity,
-    a.total_purchase_mrp,
-    a.total_purchase_cost,
+     a.sales_department sales_department,
+     a.num_of_customers num_of_customers,
+    a.sales_quantity sales_quantity,
+    a.sales_price sales_price,
+    a.sales_total_price sales_total_price,
+    a.total_line_discount total_line_discount,
+    a.total_crm_line_discount total_crm_line_discount,
+    a.total_discount total_discount,
+    a.total_tax total_tax,
+    a.total_cost total_cost,
+    a.total_billing total_billing,
+    a.contribution contribution,
+    a.total_trade_incentive total_trade_incentive,
+    a.total_trade_incentive_value total_trade_incentive_value,
+    a.total_contribution total_contribution,
+    a.total_purchase_quantity total_purchase_quantity,
+    a.total_purchase_mrp total_purchase_mrp,
+    a.total_purchase_cost total_purchase_cost,
     first(b.product_group_code) product_group_code,
     sum(b.quantity) transfer_quantity,
     sum(b.cost_amount) transfer_cost_amount,
