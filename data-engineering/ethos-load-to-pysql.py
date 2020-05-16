@@ -81,13 +81,10 @@ transfer_data = transfer1.unionAll(transfer2).unionAll(transfer3)
 
 
 sales_data.createOrReplaceTempView("sales_raw")
-sales_data.cache()
 
 purchase_data.createOrReplaceTempView("purchase_raw")
-purchase_data.cache()
 
 transfer_data.createOrReplaceTempView("transfer_raw")
-transfer_data.cache()
    
 # Load master data
 store_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "store_master.csv")
@@ -127,10 +124,10 @@ combined_csv = pd.concat([pd.read_csv(f) for f in all_filenames ])
 combined_csv.dropna(subset=['Item No_', 'Location Code']).to_csv(weekly_closing_output_path, index=False, encoding='utf-8')
 
 closing_stock_data = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(weekly_closing_output_path)
-closing_stock_data = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(data_path + 'closing_stock_data.csv')
+
+# closing_stock_data = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(data_path + 'closing_stock_data.csv')
 data_path
 closing_stock_data.createOrReplaceTempView("closing_stock_raw")
-closing_stock_data.cache()      
 
 
 '''         
@@ -138,7 +135,7 @@ for f in glob.glob(path):
     print (f)
 '''
     
-    
+## Aggregate duplicate closing tock file by item_no,location_code,closing_date 
 closing_sql = """select
 `Location Code` location_code,
 `Item No_` item_no,
@@ -156,36 +153,9 @@ from closing_stock_raw
 group by item_no,location_code,closing_date
 """
 
-    
-closing_sql = """select
-location_code,
-item_no,
-first(brand) brand,
-first(department) department,
-sum(quantity) quantity,
-sum(cost_amount) cost_amount,
-sum(purchase_mrp) purchase_mrp,
-sum(stock_prevailing_mrp) stock_prevailing_mrp,
-first(to_date(purchase_date, 'yyyy/MM/dd')) purchase_date,
-first(state) state,
-first(region) region,
-to_date(closing_date, 'yyyy/MM/dd') closing_date
-from closing_stock_raw
-group by item_no,location_code,closing_date
-"""
-
 closing_stock_table = sqlContext.sql(closing_sql)
 closing_stock_table.createOrReplaceTempView("closing_stock")
-closing_stock_table.cache()
 
-weeks_sql = '''select
-distinct closing_date
-from closing_stock
-'''
-
-#where closing_date = to_date('2018/03/11', 'yyyy/MM/dd')
-
-weeks = sqlContext.sql(weeks_sql)
 
 sales_sql = '''select
      `Store No_` location_code,
@@ -215,12 +185,6 @@ from sales_raw
 
 sales_table = sqlContext.sql(sales_sql)
 sales_table.createOrReplaceTempView("sales")
-sales_table.cache()
-
-
-## Duplicates in sales table - 216667 reduced to 201184
-# Droppong duplicates on ['store_no', 'sales_date', 'item_no']
-
 
 
 purchase_sql = """select
@@ -259,6 +223,7 @@ sales_join_data_query = '''SELECT
      a.state state,
      a.region region,
     first(b.sales_department) sales_department,
+    mean(DATDIFF(b.sales_date - a.closing_date)) days_to_sell,
     sum(b.customer_no) num_of_customers,
     sum(b.quantity) sales_quantity,
     sum(b.price) sales_price,
@@ -280,7 +245,8 @@ AND b.sales_date > a.closing_date
 AND b.sales_date <= date_add(a.closing_date, 7)
 GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12
 '''
-
+sales_join = sqlContext.sql(sales_join_data_query)
+sales_join.createOrReplaceTempView("sales_join")
 
 purchase_join_query = """
 SELECT
@@ -324,6 +290,7 @@ GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27
 purchase_join = sqlContext.sql(purchase_join_query)
 purchase_join.createOrReplaceTempView("purchase_join")
 
+### This is the final summary query 
 
 transfer_join_query = """
 SELECT
@@ -361,53 +328,20 @@ SELECT
     sum(b.quantity) transfer_quantity,
     sum(b.cost_amount) transfer_cost_amount,
     sum(b.mrp) transfer_mrp
-    from purchase_join a LEFT JOIN transfer b
-    ON a.location_code = b.store_in
+from purchase_join a LEFT JOIN transfer b
+ON a.location_code = b.store_in
 AND a.item_no = b.item_no
 AND b.store_in_date > a.closing_date
 AND b.store_in_date <= date_add(a.closing_date, 7)
 GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30
+LIMIT 100
 """
 
 transfer_join = sqlContext.sql(transfer_join_query)
 transfer_join.createOrReplaceTempView("transfer_join")
+ 
 
-
-sales_new_join_query = '''
-select 
- a.location_code location_code,
- a.item_no item_no,
- a.closing_date,a.closing_week,a.closing_year,
- a.brand brand,
- a.department department,
- a.quantity quantity,
- a.cost_amount cost_amount,
- a.purchase_mrp purchase_mrp,
- a.stock_prevailing_mrp stock_prevailing_mrp,
- a.purchase_date purchase_date,
- a.state state,
- a.region region,
- b.sales_department sales_department,
- b.num_of_customers num_of_customers,
- b.sales_quantity sales_quantity,
- b.sales_price sales_price,
- b.sales_total_price sales_total_price,
- b.total_line_discount total_line_discount,
- b.total_crm_line_discount total_crm_line_discount,
- b.total_discount total_discount,
- b.total_tax total_tax,
- b.total_cost total_cost,
- b.total_billing total_billing,
- b.contribution contribution,
- b.total_trade_incentive total_trade_incentive,
- b.total_trade_incentive_value total_trade_incentive_value,
- b.total_contribution total_contribution
- from closing_stock a LEFT JOIN sales_weekly b
- ON a.location_code = b.location_code 
- AND a.item_no = b.item_no
- AND b.sales_week = a.closing_week + 1
- AND b.sales_year = a.closing_year
-'''
+## All these queries will be handy for tally
 
 sales_group_by = '''select
  b.item_no item_no,
@@ -437,16 +371,6 @@ group by item_no, location_code, sales_week, sales_year
 sales_weekly = sqlContext.sql(sales_group_by).createOrReplaceTempView("sales_weekly")
 
 
-test = '''
-select
-count(*) c
-from closing_stock a LEFT JOIN sales b
- ON a.location_code = b.location_code 
- AND a.item_no = b.item_no
- AND b.sales_date > a.closing_date
- AND b.sales_date <= date_add(a.closing_date, 7)
-'''
-
 import pyspark.sql.functions as F
 sales_join = closing_stock_table.join(sales_table, on=['location_code', 'item_no'],how='left').filter(closing_stock_table.closing_date <= sales_table.sales_date).filter(sales_table.sales_date > F.date_add(closing_stock_table.closing_date, 7))
 
@@ -468,10 +392,7 @@ temp = sqlContext.sql("""select * from sales_join where closing_date in (to_date
 sqlContext.sql("""select sales_date, weekofyear(sales_date), year(sales_date) from sales where DATEDIFF(sales_date, to_date('2018/07/29','yyyy/MM/dd')) < 7 and DATEDIFF(sales_date, to_date('2019/09/08','yyyy/MM/dd')) < 7""")
 
 
-sales_join = sqlContext.sql(sales_new_join_query)
-sales_join.createOrReplaceTempView("sales_join")
-
-
+# Transfer to file
 temp.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'purchase_join_2018-07-29 and 2019-09-08.csv',header = 'true')
 temp.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'transfer_join.csv',header = 'true')
 
@@ -481,9 +402,6 @@ sqlContext.sql("""select distinct closing_week, year from closing_stock where cl
 sqlContext.sql("""select * from sales_weekly where sales_week in (30, 36) and sales_year in (2018, 2018)""").show()
 
 sqlContext.sql("""select distinct * from closing_stock where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd')) and item_no in (5120031, 5121915) and location_code = 'S02'""").show()
-
-
-
 
 
 sales_join = sqlContext.sql(sales_new_join_query)
@@ -516,7 +434,31 @@ temp = sqlContext.sql("""select * from purchase_join where closing_date in (to_d
 >>> temp = sqlContext.sql("""select * from transfer_join where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd'))""")
 
 
+closing_sql = select
+location_code,
+item_no,
+first(brand) brand,
+first(department) department,
+sum(quantity) quantity,
+sum(cost_amount) cost_amount,
+sum(purchase_mrp) purchase_mrp,
+sum(stock_prevailing_mrp) stock_prevailing_mrp,
+first(to_date(purchase_date, 'yyyy/MM/dd')) purchase_date,
+first(state) state,
+first(region) region,
+to_date(closing_date, 'yyyy/MM/dd') closing_date
+from closing_stock_raw
+group by item_no,location_code,closing_date
 
+
+weeks_sql = select
+distinct closing_date
+from closing_stock
+
+
+weeks = sqlContext.sql(weeks_sql)
+
+'''
 
 
 
