@@ -26,6 +26,7 @@ import pymysql
 import glob
 from datetime import datetime
 
+
 connection_details = {
     'name': 'local',
     'conn': '127.0.0.1',
@@ -89,8 +90,14 @@ transfer_data.createOrReplaceTempView("transfer_raw")
 # Load master data
 store_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "store_master.csv")
 item_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Item_Attributes_Encoded_final.csv")
+
+item_master_old = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Item_Master.csv")
+
+item_master_union = item_master.unionAll(item_master_old)
+item_master_union = item_master_union.dropDuplicates(subset = ['item_no'])
+
 store_master.createOrReplaceTempView("store_master")
-item_master.createOrReplaceTempView("item_master") 
+item_master_union.createOrReplaceTempView("item_master") 
 # load weekly closing data
 weekly_closing_dir_path = '/Users/parulgaba/Desktop/Capstone-Ethos/Encoded/weekly-closing-stock/'
 weekly_closing_file_path = weekly_closing_dir_path + '*.csv'
@@ -291,15 +298,20 @@ GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27
 purchase_join = sqlContext.sql(purchase_join_query)
 purchase_join.createOrReplaceTempView("purchase_join")
 
-### This is the final summary query 
 
-transfer_join_query = """
+## Join item master and store master
+
+purchase_store_master = purchase_join.join(store_master, store_master.store_code == purchase_join.location_code)
+purchase_store_master.createOrReplaceTempView("purchase_store_master")
+# purchase_item_master = purchase_store_master.join(item_master, purchase_store_master.item_no == item_master.item_no)
+
+purchase_item_query = """
 SELECT
      a.location_code location_code,
      a.item_no item_no,
      a.closing_date closing_date,
-     a.brand brand,
-     a.department department,
+     b.brand brand,
+     b.department department,
      a.quantity quantity,
      a.cost_amount cost_amount,
      a.purchase_mrp purchase_mrp,
@@ -307,6 +319,7 @@ SELECT
      a.purchase_date purchase_date,
      a.state state,
      a.region region,
+     a.days_to_sell days_to_sell,
      a.sales_department sales_department,
      a.num_of_customers num_of_customers,
     a.sales_quantity sales_quantity,
@@ -325,19 +338,102 @@ SELECT
     a.total_purchase_quantity total_purchase_quantity,
     a.total_purchase_mrp total_purchase_mrp,
     a.total_purchase_cost total_purchase_cost,
+    a.store_code,
+    a.store_type,
+    a.store_location,
+    a.city_type,
+    b.case_size,
+    b.case_size_range,
+    b.gender,
+    b.movement,
+    b.material,
+    b.dial_color,
+    b.strap_type,
+    b.strap_color,
+    b.precious_stone,
+    b.glass,
+    b.case_shape,
+    b.watch_type
+from purchase_store_master a LEFT JOIN item_master b
+ON a.item_no = b.item_no
+"""
+purchase_item_master = sqlContext.sql(purchase_item_query)
+
+purchase_item_master.createOrReplaceTempView("purchase_item_master")
+
+### This is the final summary query 
+
+transfer_join_query = """
+SELECT
+         a.location_code location_code,
+     a.item_no item_no,
+     a.closing_date closing_date,
+     a.brand brand,
+     a.department department,
+     a.quantity quantity,
+     a.cost_amount cost_amount,
+     a.purchase_mrp purchase_mrp,
+     a.stock_prevailing_mrp stock_prevailing_mrp,
+     a.purchase_date purchase_date,
+     a.state state,
+     a.region region,
+     a.days_to_sell days_to_sell,
+     a.sales_department sales_department,
+     a.num_of_customers num_of_customers,
+    a.sales_quantity sales_quantity,
+    a.sales_price sales_price,
+    a.sales_total_price sales_total_price,
+    a.total_line_discount total_line_discount,
+    a.total_crm_line_discount total_crm_line_discount,
+    a.total_discount total_discount,
+    a.total_tax total_tax,
+    a.total_cost total_cost,
+    a.total_billing total_billing,
+    a.contribution contribution,
+    a.total_trade_incentive total_trade_incentive,
+    a.total_trade_incentive_value total_trade_incentive_value,
+    a.total_contribution total_contribution,
+    a.total_purchase_quantity total_purchase_quantity,
+    a.total_purchase_mrp total_purchase_mrp,
+    a.total_purchase_cost total_purchase_cost,
+    a.store_code,
+    a.store_type,
+    a.store_location,
+    a.city_type,
+    a.case_size,
+    a.case_size_range,
+    a.gender,
+    a.movement,
+    a.material,
+    a.dial_color,
+    a.strap_type,
+    a.strap_color,
+    a.precious_stone,
+    a.glass,
+    a.case_shape,
+    a.watch_type,
     first(b.product_group_code) product_group_code,
     sum(b.quantity) transfer_quantity,
     sum(b.cost_amount) transfer_cost_amount,
     sum(b.mrp) transfer_mrp
-from purchase_join a LEFT JOIN transfer b
+from purchase_item_master a LEFT JOIN transfer b
 ON a.location_code = b.store_in
 AND a.item_no = b.item_no
-AND b.store_in_date > a.closing_date
-AND b.store_in_date <= date_add(a.closing_date, 7)
-GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30
-LIMIT 100
+AND b.store_in_date >= a.closing_date
+AND b.store_in_date < date_add(a.closing_date, 7)
+GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47
 """
 
+#AND weekofyear(a.closing_date) = weekofyear(b.store_in_date)
+#AND year(a.closing_date) = year(b.store_in_date)
+#AND DATEDIFF(a.closing_date,b.store_in_date) < 7
+
+
+
+purchase_summary = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(data_path + 'purchase_item_master.csv')
+# purchase_summary.createOrReplaceTempView("purchase_item_master")
+
+purchase_item_master.createOrReplaceTempView("purchase_item_master")
 transfer_join = sqlContext.sql(transfer_join_query)
 transfer_join.createOrReplaceTempView("transfer_join")
  
@@ -371,6 +467,19 @@ group by item_no, location_code, sales_week, sales_year
 
 sales_weekly = sqlContext.sql(sales_group_by).createOrReplaceTempView("sales_weekly")
 
+## Tally item master data
+
+unique_items_in_item_master = item_master.select('item_no').distinct() 
+# Unique = 31224 # Total count = 31990
+
+unique_items_in_transactional_data = purchase_store_master.select('item_no').distinct() 
+# 20422 # Total count = 5770009 (doesn't matter here ofcourse)
+
+# 5723450
+
+unique_items_in_transactional_data.subtract(unique_items_in_transactional_data.intersect(unique_items_in_item_master)).count()
+## 1288 items not found in item_master - Id's captured in csv file
+
 
 import pyspark.sql.functions as F
 sales_join = closing_stock_table.join(sales_table, on=['location_code', 'item_no'],how='left').filter(closing_stock_table.closing_date <= sales_table.sales_date).filter(sales_table.sales_date > F.date_add(closing_stock_table.closing_date, 7))
@@ -395,7 +504,9 @@ sqlContext.sql("""select sales_date, weekofyear(sales_date), year(sales_date) fr
 
 # Transfer to file
 temp.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'purchase_join_2018-07-29 and 2019-09-08.csv',header = 'true')
-temp.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'transfer_join.csv',header = 'true')
+purchase_item_master.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'purchase_item_master.csv',header = 'true')
+
+transfer_join.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'transfer_join.csv',header = 'true')
 
 
 sqlContext.sql("""select distinct closing_week, year from closing_stock where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd'))""").show()
@@ -412,6 +523,9 @@ sales_join.createOrReplaceTempView("sales_join")
 temp = sqlContext.sql("""select * from purchase_join where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd'))""")
 
 
+#Subset
+
+small_summary = purchase_summary.filter("closing_date <= date'2020-02-02' and closing_date >= date'2019-07-23'")
 
 '''
  first(b.num_of_customers) num_of_customers,
@@ -459,7 +573,28 @@ from closing_stock
 
 weeks = sqlContext.sql(weeks_sql)
 
+
+>>> item_master.count()
+31990
+
+>>> purchase_item_master = purchase_store_master.join(item_master, purchase_store_master.item_no == item_master.item_no)
+>>> purchase_item_master.count()
+5711045
+
+>>> purchase_store_master.select('item_no').distinct().count()
+20422
+
+>>> item_master.count()
+31990
+
+>>> item_master.select('item_no').distinct().count()
+31224
 '''
+
+
+purchase_store_master.join(item_master, purchase_store_master.item_no == item_master.item_no, how='left').select(purchase_store_master['item_no'], 'case_size_range', 'gender', 'movement', 'material', 'dial_color', 'strap_type', 'strap_color', 'precious_stone', 'glass', 'case_shape', 'watch_type')
+
+
 
 
 
