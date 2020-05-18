@@ -133,7 +133,6 @@ combined_csv.dropna(subset=['Item No_', 'Location Code']).to_csv(weekly_closing_
 closing_stock_data = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(weekly_closing_output_path)
 
 # closing_stock_data = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(data_path + 'closing_stock_data.csv')
-data_path
 closing_stock_data.createOrReplaceTempView("closing_stock_raw")
 
 
@@ -488,6 +487,8 @@ unique_items_in_transactional_data.subtract(unique_items_in_transactional_data.i
 
 
 ## Tally Sales Data
+
+'''
 sales_table.filter("sales_date <= date'2020-02-08' and sales_date > date'2019-07-28'").groupBy().sum('quantity', 'total_price').show()
 
 +-------------+-------------------+
@@ -495,10 +496,6 @@ sales_table.filter("sales_date <= date'2020-02-08' and sales_date > date'2019-07
 +-------------+-------------------+
 |        35766|3.867318390048828E9|
 +-------------+-------------------+
-
-|2019-09-08|
-|2019-09-15
-22 sept - sunday
 
 ## Sales quantity that wasn't mapped - Left anti join filters on what's not in the left table that's there in right table
 sales_table.filter("sales_date > date'2019-09-08' and sales_date < date'2019-09-23'").join(unique_items, on=['item_no', 'location_code'], how = 'inner').groupBy().sum('quantity', 'total_price', 'billing').show()
@@ -523,6 +520,43 @@ transfer_join.groupBy().sum('sales_quantity', 'sales_total_price', 'total_billin
 |              30012|  3.0804617806992188E9|2.5345465067001953E9|
 +-------------------+----------------------+--------------------+
 
+transfer_join_full.groupBy().sum('transfer_mrp', 'transfer_quantity', 'quantity', 'sales_quantity', 'total_purchase_quantity').show()
++-----------------+----------------------+-------------+-------------------+----------------------------+
+|sum(transfer_mrp)|sum(transfer_quantity)|sum(quantity)|sum(sales_quantity)|sum(total_purchase_quantity)|
++-----------------+----------------------+-------------+-------------------+----------------------------+
+|    1.201597499E9|                  8796|      6802945|             161986|                       12856|
++-----------------+----------------------+-------------+-------------------+----------------------------+
+
+>>> closing_stock_table.groupBy().sum('quantity').show()
++-------------+
+|sum(quantity)|
++-------------+
+|      6802945|
++-------------+
+
+>>> transfer_table.groupBy().sum('mrp', 'quantity').show()
++---------------+-------------+
+|       sum(mrp)|sum(quantity)|
++---------------+-------------+
+|1.0345724072E10|        65068|
++---------------+-------------+
+
+>>> purchase_table.groupBy().sum('quantity').show()
++-------------+
+|sum(quantity)|
++-------------+
+|       200215|
++-------------+
+
+>>> sales_table.groupBy().sum('quantity').show()
++-------------+
+|sum(quantity)|
++-------------+
+|       190407|
++-------------+
+
+'''
+
 # Get unique items in summary to avoid tallying with sales/transfer/purchase data not mapped with closing stock weekly data
 unique_items = transfer_join.select('item_no', 'location_code').distinct()
 unique_items_week = transfer_join.filter("closing_date == date'2019-09-08'").select('item_no', 'location_code').distinct()
@@ -542,7 +576,7 @@ purchase_table.repartition(1).write.format('com.databricks.spark.csv').save(data
 
 closing_stock_table.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'closing_stock.csv',header = 'true')
 sales_table.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'sales.csv',header = 'true')
-transfer_table.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'transfer.csv',header = 'true')
+transfer_join_full.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'transfer_join_full.csv',header = 'true')
 
 
 temp = sqlContext.sql("""select * from sales_join where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd'))""")
@@ -636,6 +670,8 @@ weeks = sqlContext.sql(weeks_sql)
 
 >>> item_master.select('item_no').distinct().count()
 31224
+
+pyspark --num-executors 5 --driver-memory 3g --executor-memory 3g
 '''
 
 
