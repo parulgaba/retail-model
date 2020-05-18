@@ -168,26 +168,27 @@ sales_sql = '''select
      `Store No_` location_code,
      to_date(`Date`, 'yyyy/MM/dd') sales_date,
      cast(`Item No_` as int) item_no,
-     `Brand` brand,
-     `Department` sales_department,
-     `Customer No_` customer_no,
-     cast(Quantity as int) quantity,
-     float(`Price`) price,
-     float(`Total Price`) total_price,
-     float(`Line Discount Amount`) line_discount,
-     float(`CRM Line Disc_ Amount`) crm_line_discount,
-     float(`Discount Amount`) discount,
-     float(`Tax Amount`) tax,
-     float(`Cost Amount`) cost,
-     float(`Billing`) billing,
-     float(`Contribution`) contribution,
-     to_date(`Receipt Date`, 'yyyy/MM/dd') receipt_date,
-     float(`Trade Incentive %`) trade_incentive,
-     float(`Trade Incentives Value`) trade_incentive_value,
-     float(`Total Contribution`) total_contribution,
-     `State` state,
-     `Region` region
+     first(`Brand`) brand,
+     first(`Department`) sales_department,
+     count(`Customer No_`) customer_no,
+     sum(cast(Quantity as int)) quantity,
+     sum(float(`Price`)) price,
+     sum(float(`Total Price`)) total_price,
+     sum(float(`Line Discount Amount`)) line_discount,
+     sum(float(`CRM Line Disc_ Amount`)) crm_line_discount,
+     sum(float(`Discount Amount`)) discount,
+     sum(float(`Tax Amount`)) tax,
+     sum(float(`Cost Amount`)) cost,
+     sum(float(`Billing`)) billing,
+     sum(float(`Contribution`)) contribution,
+     first(to_date(`Receipt Date`, 'yyyy/MM/dd')) receipt_date,
+     sum(float(`Trade Incentive %`)) trade_incentive,
+     sum(float(`Trade Incentives Value`)) trade_incentive_value,
+     sum(float(`Total Contribution`)) total_contribution,
+     first(`State`) state,
+     first(`Region`) region
 from sales_raw
+group by item_no, location_code, sales_date
 '''
 
 sales_table = sqlContext.sql(sales_sql)
@@ -419,8 +420,8 @@ SELECT
 from purchase_item_master a LEFT JOIN transfer b
 ON a.location_code = b.store_in
 AND a.item_no = b.item_no
-AND b.store_in_date >= a.closing_date
-AND b.store_in_date < date_add(a.closing_date, 7)
+AND b.store_in_date > a.closing_date
+AND b.store_in_date <= date_add(a.closing_date, 7)
 GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47
 """
 
@@ -436,8 +437,13 @@ purchase_summary = sqlContext.read.format("com.databricks.spark.csv").options(he
 purchase_item_master.createOrReplaceTempView("purchase_item_master")
 transfer_join = sqlContext.sql(transfer_join_query)
 transfer_join.createOrReplaceTempView("transfer_join")
- 
 
+
+### -------- JOIN LOGIC ENDS HERE --- ONLY TESTING and TALLYING BELOW ------- ####
+ 
+transfer_join.filter("closing_date = date'2020-02-02'").sum('sales_quantity', 'sales_total_price', 'total_billing','transfer_quantity', 'total_purchase_quantity')
+
+transfer_join.filter("sales_quantity > 2").select('item_no', 'location_code', 'sales_quantity', 'closing_date', 'days_to_sell')
 ## All these queries will be handy for tally
 
 sales_group_by = '''select
@@ -479,6 +485,47 @@ unique_items_in_transactional_data = purchase_store_master.select('item_no').dis
 
 unique_items_in_transactional_data.subtract(unique_items_in_transactional_data.intersect(unique_items_in_item_master)).count()
 ## 1288 items not found in item_master - Id's captured in csv file
+
+
+## Tally Sales Data
+sales_table.filter("sales_date <= date'2020-02-08' and sales_date > date'2019-07-28'").groupBy().sum('quantity', 'total_price').show()
+
++-------------+-------------------+
+|sum(quantity)|   sum(total_price)|
++-------------+-------------------+
+|        35766|3.867318390048828E9|
++-------------+-------------------+
+
+|2019-09-08|
+|2019-09-15
+22 sept - sunday
+
+## Sales quantity that wasn't mapped - Left anti join filters on what's not in the left table that's there in right table
+sales_table.filter("sales_date > date'2019-09-08' and sales_date < date'2019-09-23'").join(unique_items, on=['item_no', 'location_code'], how = 'inner').groupBy().sum('quantity', 'total_price', 'billing').show()
+sales_table.filter("sales_date <= date'2020-02-08' and sales_date > date'2019-07-28'").join(unique_items, on=['item_no', 'location_code'], how = 'inner').groupBy().sum('quantity', 'total_price', 'billing').show()
++-------------+-------------------+-------------------+
+|sum(quantity)|   sum(total_price)|       sum(billing)|
++-------------+-------------------+-------------------+
+|        32683|3.486822001048828E9|2.876563002050293E9|
++-------------+-------------------+-------------------+
+
+sqlContext.sql(sales_join_data_query).groupBy().sum('sales_quantity', 'sales_total_price').show()
++-------------------+----------------------+
+|sum(sales_quantity)|sum(sales_total_price)|
++-------------------+----------------------+
+|              30012|  3.0804617806992188E9|
++-------------------+----------------------+
+
+transfer_join.groupBy().sum('sales_quantity', 'sales_total_price', 'total_billing').show()
++-------------------+----------------------+--------------------+
+|sum(sales_quantity)|sum(sales_total_price)|  sum(total_billing)|
++-------------------+----------------------+--------------------+
+|              30012|  3.0804617806992188E9|2.5345465067001953E9|
++-------------------+----------------------+--------------------+
+
+# Get unique items in summary to avoid tallying with sales/transfer/purchase data not mapped with closing stock weekly data
+unique_items = transfer_join.select('item_no', 'location_code').distinct()
+unique_items_week = transfer_join.filter("closing_date == date'2019-09-08'").select('item_no', 'location_code').distinct()
 
 
 import pyspark.sql.functions as F
@@ -525,7 +572,7 @@ temp = sqlContext.sql("""select * from purchase_join where closing_date in (to_d
 
 #Subset
 
-small_summary = purchase_summary.filter("closing_date <= date'2020-02-02' and closing_date >= date'2019-07-23'")
+small_summary = purchase_summary.filter("closing_date <= date'2020-02-02' and closing_date >= date'2019-07-28'")
 
 '''
  first(b.num_of_customers) num_of_customers,
