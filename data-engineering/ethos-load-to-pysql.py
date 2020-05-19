@@ -142,7 +142,7 @@ for f in glob.glob(path):
 '''
     
 ## Aggregate duplicate closing tock file by item_no,location_code,closing_date 
-closing_sql = """select
+closing_sql = """SELECT
 `Location Code` location_code,
 `Item No_` item_no,
 first(`Brand`) brand,
@@ -156,8 +156,7 @@ first(`State`) state,
 first(`Region`) region,
 to_date(closing_date, 'yyyy/MM/dd') closing_date
 from closing_stock_raw
-group by item_no,location_code,closing_date
-"""
+group by item_no, location_code,closing_date"""
 
 closing_stock_table = sqlContext.sql(closing_sql)
 closing_stock_table.createOrReplaceTempView("closing_stock")
@@ -439,7 +438,7 @@ purchase_summary = sqlContext.read.format("com.databricks.spark.csv").options(he
 transfer_join = sqlContext.sql(transfer_join_query)
 transfer_join.createOrReplaceTempView("transfer_join")
 
-
+transfer_join.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'ethos_transaction_summary.csv',header = 'true')
 ### -------- JOIN LOGIC ENDS HERE --- ONLY TESTING and TALLYING BELOW ------- ####
  
 transfer_join.filter("closing_date = date'2020-02-02'").sum('sales_quantity', 'sales_total_price', 'total_billing','transfer_quantity', 'total_purchase_quantity')
@@ -493,6 +492,63 @@ unique_items_in_transactional_data.subtract(unique_items_in_transactional_data.i
 ## Tally Sales Data
 
 '''
+
+Join with purchase date, and store in date joined with closing_date + 7
+transfer_join_full.groupBy().sum('quantity', 'transfer_quantity', 'sales_quantity', 'total_purchase_quantity').show()
++-----------------+----------------------+-------------+-------------------+----------------------------+
+|sum(transfer_mrp)|sum(transfer_quantity)|sum(quantity)|sum(sales_quantity)|sum(total_purchase_quantity)|
++-----------------+----------------------+-------------+-------------------+----------------------------+
+|    1.201597499E9|                  8796|      6802945|             161986|                       12856|
++-----------------+----------------------+-------------+-------------------+----------------------------+
+
+
+There's a better tally for transfer quantity on below condition:
+from purchase_item_master a LEFT JOIN transfer b
+ON a.location_code = b.store_in
+AND a.item_no = b.item_no
+AND b.store_in_date < a.closing_date
+AND b.store_in_date >= date_sub(a.closing_date, 7)
+
+Goes below
+>>> transfer_join.groupBy().sum('quantity', 'transfer_quantity', 'sales_quantity', 'total_purchase_quantity').show()
++-------------+----------------------+-------------------+----------------------------+
+|sum(quantity)|sum(transfer_quantity)|sum(sales_quantity)|sum(total_purchase_quantity)|
++-------------+----------------------+-------------------+----------------------------+
+|      6802945|                147883|             161986|                      179082|
++-------------+----------------------+-------------------+----------------------------+
+
+
+>>> closing_stock_table.groupBy().sum('quantity').show()
++-------------+
+|sum(quantity)|
++-------------+
+|      6802945|
++-------------+
+
+>>> transfer_table.groupBy().sum('mrp', 'quantity').show()
++--------------------+-------------+
+|            sum(mrp)|sum(quantity)|
++--------------------+-------------+
+|2.548899039574707E10|       185772|
++--------------------+-------------+
+
+>>> purchase_table.groupBy().sum('quantity').show()
++-------------+
+|sum(quantity)|
++-------------+
+|       200215|
++-------------+
+
+>>> sales_table.groupBy().sum('quantity').show()
++-------------+
+|sum(quantity)|
++-------------+
+|       190407|
++-------------+
+
+
+MISC TALLY
+
 sales_table.filter("sales_date <= date'2020-02-08' and sales_date > date'2019-07-28'").groupBy().sum('quantity', 'total_price').show()
 
 +-------------+-------------------+
@@ -510,83 +566,15 @@ sales_table.filter("sales_date <= date'2020-02-08' and sales_date > date'2019-07
 |        32683|3.486822001048828E9|2.876563002050293E9|
 +-------------+-------------------+-------------------+
 
-sqlContext.sql(sales_join_data_query).groupBy().sum('sales_quantity', 'sales_total_price').show()
-+-------------------+----------------------+
-|sum(sales_quantity)|sum(sales_total_price)|
-+-------------------+----------------------+
-|              30012|  3.0804617806992188E9|
-+-------------------+----------------------+
-
-transfer_join.groupBy().sum('sales_quantity', 'sales_total_price', 'total_billing').show()
-+-------------------+----------------------+--------------------+
-|sum(sales_quantity)|sum(sales_total_price)|  sum(total_billing)|
-+-------------------+----------------------+--------------------+
-|              30012|  3.0804617806992188E9|2.5345465067001953E9|
-+-------------------+----------------------+--------------------+
-
-transfer_join_full.groupBy().sum('quantity', 'transfer_quantity', 'sales_quantity', 'total_purchase_quantity').show()
-+-----------------+----------------------+-------------+-------------------+----------------------------+
-|sum(transfer_mrp)|sum(transfer_quantity)|sum(quantity)|sum(sales_quantity)|sum(total_purchase_quantity)|
-+-----------------+----------------------+-------------+-------------------+----------------------------+
-|    1.201597499E9|                  8796|      6802945|             161986|                       12856|
-+-----------------+----------------------+-------------+-------------------+----------------------------+
-
->>> transfer_join.groupBy().sum('quantity', 'transfer_quantity', 'sales_quantity', 'total_purchase_quantity').show()
-+-------------+----------------------+-------------------+----------------------------+
-|sum(quantity)|sum(transfer_quantity)|sum(sales_quantity)|sum(total_purchase_quantity)|
-+-------------+----------------------+-------------------+----------------------------+
-|      1262404|                 34310|              30012|                       21886|
-+-------------+----------------------+-------------------+----------------------------+
-
-
-There's a better tally for transfer quantity on below condition:
-from purchase_item_master a LEFT JOIN transfer b
-ON a.location_code = b.store_in
-AND a.item_no = b.item_no
-AND b.store_in_date < a.closing_date
-AND b.store_in_date >= date_sub(a.closing_date, 7)
-
-
->>> closing_stock_table.groupBy().sum('quantity').show()
-+-------------+
-|sum(quantity)|
-+-------------+
-|      6802945|
-+-------------+
-
->>> transfer_table.groupBy().sum('mrp', 'quantity').show()
-+---------------+-------------+
-|       sum(mrp)|sum(quantity)|
-+---------------+-------------+
-|1.0345724072E10|        65068|
-+---------------+-------------+
-
->>> purchase_table.groupBy().sum('quantity').show()
-+-------------+
-|sum(quantity)|
-+-------------+
-|       200215|
-+-------------+
-
-transfer_join_exp.groupBy().sum('transfer_mrp', 'transfer_quantity', 'quantity', 'sales_quantity', 'total_purchase_quantity').show()
-+-----------------+----------------------+-------------+-------------------+----------------------------+
-|sum(transfer_mrp)|sum(transfer_quantity)|sum(quantity)|sum(sales_quantity)|sum(total_purchase_quantity)|
-+-----------------+----------------------+-------------+-------------------+----------------------------+
-|    8.090626701E9|                 51297|      6802945|             161986|                       12856|
-+-----------------+----------------------+-------------+-------------------+----------------------------+
-+----------------------------+
-|sum(total_purchase_quantity)|
-+----------------------------+
-|                      179082|
-+----------------------------+
-
-
->>> sales_table.groupBy().sum('quantity').show()
-+-------------+
-|sum(quantity)|
-+-------------+
-|       190407|
-+-------------+
+transfer_join.select('gender').distinct().show()
++------+
+|gender|
++------+
+|  null|
+|   Men|
+| Women|
+|Unisex|
++------+
 
 '''
 
@@ -597,22 +585,6 @@ unique_items_week = transfer_join.filter("closing_date == date'2019-09-08'").sel
 
 import pyspark.sql.functions as F
 sales_join = closing_stock_table.join(sales_table, on=['location_code', 'item_no'],how='left').filter(closing_stock_table.closing_date <= sales_table.sales_date).filter(sales_table.sales_date > F.date_add(closing_stock_table.closing_date, 7))
-
-
-data_summary = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load("/Users/parulgaba/Desktop/Capstone-Ethos/summarized_data_new.csv")
-
-closing_stock_table.join(item_master, how='left').join(store_master, how='left')
-
-purchase_table.repartition(1).write.csv(data_path + 'purchase.csv')
-
-purchase_table.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'purchase.csv',header = 'true')
-
-closing_stock_table.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'closing_stock.csv',header = 'true')
-sales_table.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'sales.csv',header = 'true')
-# transfer_join_full.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'transfer_join_full.csv',header = 'true')
-
-transfer_join.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'ethos_transaction_summary.csv',header = 'true')
-
 
 temp = sqlContext.sql("""select * from sales_join where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd'))""")
 sqlContext.sql("""select sales_date, weekofyear(sales_date), year(sales_date) from sales where DATEDIFF(sales_date, to_date('2018/07/29','yyyy/MM/dd')) < 7 and DATEDIFF(sales_date, to_date('2019/09/08','yyyy/MM/dd')) < 7""")
@@ -641,23 +613,9 @@ temp = sqlContext.sql("""select * from purchase_join where closing_date in (to_d
 
 #Subset
 
-small_summary = purchase_summary.filter("closing_date <= date'2020-02-02' and closing_date >= date'2019-07-28'")
+small_summary = transfer_join.filter("closing_date <= date'2020-02-02' and closing_date >= date'2019-07-28'")
 
 '''
- first(b.num_of_customers) num_of_customers,
- first(b.sales_quantity) sales_quantity,
- first(b.sales_price) sales_price,
- first(b.sales_total_price) sales_total_price,
- first(b.total_line_discount) total_line_discount,
- first(b.total_crm_line_discount) total_crm_line_discount,
- first(b.total_discount) total_discount,
- first(b.total_tax) total_tax,
- first(b.total_cost) total_cost,
- first(b.total_billing) total_billing,
- first(b.contribution) contribution,
- first(b.total_trade_incentive) total_trade_incentive,
- first(b.total_trade_incentive_value) total_trade_incentive_value,
- first(b.total_contribution) total_contribution
 
 
 >>> sales_join = sqlContext.sql(sales_new_join_query)
