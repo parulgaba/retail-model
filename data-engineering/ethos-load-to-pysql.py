@@ -17,7 +17,7 @@ from pyspark.sql.functions import desc
 sc = SparkContext(appName="PythonStreamingQueueStream") 
 sqlContext = SQLContext(sc)
 '''
-
+"""
 import csv
 import os
 import pandas as pd
@@ -146,25 +146,18 @@ for f in glob.glob(path):
 '''
     
 ## Aggregate duplicate closing tock file by item_no,location_code,closing_date 
-closing_sql = """SELECT
-`Location Code` location_code,
-`Item No_` item_no,
-first(`Brand`) brand,
-first(`Department`) department,
-sum(cast(Quantity as int)) quantity,
-sum(float(`Cost Amount`)) cost_amount,
-sum(float(`Purchase MRP`)) purchase_mrp,
-sum(float(`Prevailing MRP as on Stock Date`)) stock_prevailing_mrp,
-first(to_date(`Purchase Date`, 'yyyy/MM/dd')) purchase_date,
-first(`State`) state,
-first(`Region`) region,
-to_date(closing_date, 'yyyy/MM/dd') closing_date
-from closing_stock_raw
-group by item_no, location_code,closing_date"""
+
+
+
+"""
 
 closing_sql = """select
 location_code,
 item_no,
+to_date(closing_date, 'yyyy/MM/dd') closing_date,
+CASE WHEN to_date(closing_date, 'yyyy/MM/dd') = to_date('2019/03/31', 'yyyy/MM/dd')
+THEN CONCAT('W01', '-FY', (year(date_sub(closing_date, 90)) + 1) % 100, year(date_sub(closing_date, 90)) % 100 + 2)
+ELSE CONCAT('W', lpad(weekofyear(date_sub(closing_date, 90)),2,0), '-FY', year(date_sub(closing_date, 90)) % 100, year(date_sub(closing_date, 90)) % 100 + 1) END week,
 first(brand) brand,
 first(department) department,
 sum(quantity) quantity,
@@ -173,17 +166,15 @@ sum(purchase_mrp) purchase_mrp,
 sum(stock_prevailing_mrp) stock_prevailing_mrp,
 first(to_date(purchase_date, 'yyyy/MM/dd')) purchase_date,
 first(state) state,
-first(region) region,
-to_date(closing_date, 'yyyy/MM/dd') closing_date,
-CASE WHEN to_date(closing_date, 'yyyy/MM/dd') = to_date('2019/03/31', 'yyyy/MM/dd')
-THEN CONCAT('W1', '-FY', (year(closing_date) + 1) % 100, year(closing_date) % 100 + 2)
-ELSE CONCAT('W', weekofyear(date_sub(closing_date, 90)), '-FY', year(closing_date) % 100, year(closing_date) % 100 + 1) END closing_week
+first(region) region
 from closing_stock_raw 
+where closing_date is not null
 group by item_no,location_code,closing_date"""
 
 closing_stock_table = sqlContext.sql(closing_sql)
 closing_stock_table.createOrReplaceTempView("closing_stock")
 
+# 'yyyy/MM/dd'
 
 sales_sql = '''select
      `Store No_` location_code,
@@ -209,13 +200,45 @@ sales_sql = '''select
      first(`State`) state,
      first(`Region`) region
 from sales_raw
+where `Date` is not null
 group by 1,2,3
 '''
 
+sales3.createOrReplaceTempView("sales_3")
+sales3_sql = """
+select
+     `Store No_` location_code,
+     to_date(`Date`, 'dd/MM/yyyy') sales_date,
+     cast(`Item No_` as int) item_no,
+     first(`Brand`) brand,
+     first(`Department`) sales_department,
+     count(`Customer No_`) customer_no,
+     sum(cast(Quantity as int)) quantity,
+     sum(float(`Price`)) price,
+     sum(float(`Total Price`)) total_price,
+     sum(float(`Line Discount Amount`)) line_discount,
+     sum(float(`CRM Line Disc_ Amount`)) crm_line_discount,
+     sum(float(`Discount Amount`)) discount,
+     sum(float(`Tax Amount`)) tax,
+     sum(float(`Cost Amount`)) cost,
+     sum(float(`Billing`)) billing,
+     sum(float(`Contribution`)) contribution,
+     first(to_date(`Receipt Date`, 'dd/MM/yy')) receipt_date,
+     sum(float(`Trade Incentive %`)) trade_incentive,
+     sum(float(`Trade Incentives Value`)) trade_incentive_value,
+     sum(float(`Total Contribution`)) total_contribution,
+     first(`State`) state,
+     first(`Region`) region
+from sales_3
+where `Date` is not null
+group by 1,2,3
+"""
 # CONCAT('W', weekofyear(to_date(`Date`, 'yyyy/MM/dd')), '-FY', year(to_date(`Date`, 'yyyy/MM/dd')) % 100, year(to_date(`Date`, 'yyyy/MM/dd')) % 100 + 1) week
 
 sales_table = sqlContext.sql(sales_sql)
 sales_table.createOrReplaceTempView("sales")
+
+sales_3_data = sqlContext.sql(sales3_sql)
 
 
 purchase_sql = """select
@@ -230,26 +253,27 @@ purchase_sql = """select
  `State Code` state_code,
  `Region` region
 from purchase_raw
+where `Posting Date` is not null
 """
 
 purchase_table = sqlContext.sql(purchase_sql)
 purchase_table.createOrReplaceTempView("purchase")
 
-transfer_sql = """select `Store Out` store_out, to_date(`Store Out Date`, 'yyyy/MM/dd') store_out_date, `Store In` store_in, to_date(`Store In Date`, 'yyyy/MM/dd') store_in_date, `Item No_` item_no, `Brand` brand, `Product Group Code` product_group_code, `Quantity` quantity, `Cost Amount` cost_amount, float(MRP) mrp, to_date(`Purchase Date`, 'yyyy/MM/dd') purchase_date, `State` state, `Region` region from transfer_raw"""
+transfer_sql = """select `Store Out` store_out, to_date(`Store Out Date`, 'yyyy/MM/dd') store_out_date, `Store In` store_in, to_date(`Store In Date`, 'yyyy/MM/dd') store_in_date, `Item No_` item_no, `Brand` brand, `Product Group Code` product_group_code, `Quantity` quantity, `Cost Amount` cost_amount, float(MRP) mrp, to_date(`Purchase Date`, 'yyyy/MM/dd') purchase_date, `State` state, `Region` region from transfer_raw where `Store In Date` is not null"""
 
 transfer_table = sqlContext.sql(transfer_sql)
 transfer_table.createOrReplaceTempView("transfer")
 
 # WEEKLY SUMMARY
-
+# lpad(weekofyear(date_sub(store_in_date, 91)), 2, 0)
 purchase_weekly_query = """SELECT
  location_code,
  item_no,
  CASE WHEN posting_date = to_date('2019/03/31', 'yyyy/MM/dd')
- THEN CONCAT('W1', '-FY', (year(date_sub(posting_date, 91)) + 1) % 100, year(date_sub(posting_date, 91)) % 100 + 2)
+ THEN CONCAT('W01', '-FY', (year(date_sub(posting_date, 91)) + 1) % 100, year(date_sub(posting_date, 91)) % 100 + 2)
  WHEN posting_date = to_date('2019/04/01', 'yyyy/MM/dd')
  THEN CONCAT('W52', '-FY', (year(date_sub(posting_date, 91)) - 1) % 100, year(date_sub(posting_date, 91)) % 100)
- ELSE CONCAT('W', weekofyear(date_sub(posting_date, 91)), '-FY', year(date_sub(posting_date, 91)) % 100, year(date_sub(posting_date, 91)) % 100 + 1) END purchase_week,
+ ELSE CONCAT('W', lpad(weekofyear(date_sub(posting_date, 91)),2,0), '-FY', year(date_sub(posting_date, 91)) % 100, year(date_sub(posting_date, 91)) % 100 + 1) END week,
  first(brand) brand,
  first(department) department,
  sum(quantity) quantity,
@@ -266,8 +290,7 @@ purchase_join_query = """
 SELECT
      CASE WHEN a.location_code is not null THEN a.location_code ELSE b.location_code END location_code,
      CASE WHEN a.item_no is not null THEN a.item_no ELSE b.item_no END item_no,
-     CASE WHEN a.closing_week is not null THEN a.closing_week ELSE b.purchase_week END closing_week,
-     b.purchase_week purchase_week,
+     CASE WHEN a.week is not null THEN a.week ELSE b.week END week,
      a.closing_date closing_date,
      CASE WHEN a.brand is not null THEN a.brand ELSE b.brand END brand,
      CASE WHEN a.department is not null THEN a.brand ELSE b.department END department,
@@ -282,19 +305,19 @@ SELECT
     from closing_stock a FULL OUTER JOIN purchase_weekly b
 ON a.location_code = b.location_code
 AND a.item_no = b.item_no
-AND b.purchase_week = a.closing_week
+AND b.week = a.week
 """
 purchase_join = sqlContext.sql(purchase_join_query)
 purchase_join.createOrReplaceTempView("purchase_join")
 
 transfer_weekly_query = """SELECT
-item_no,
+ item_no,
  store_in,
- CASE WHEN store_in_date = to_date('2019/03/31', 'yyyy/MM/dd')
- THEN CONCAT('12', '-FY', (year(date_sub(store_in_date, 91)) + 1) % 100, year(date_sub(store_in_date, 91)) % 100 + 2)
+CASE WHEN store_in_date = to_date('2019/03/31', 'yyyy/MM/dd')
+ THEN CONCAT('W01', '-FY', (year(date_sub(store_in_date, 91)) + 1) % 100, year(date_sub(store_in_date, 91)) % 100 + 2)
  WHEN store_in_date = to_date('2019/04/01', 'yyyy/MM/dd')
  THEN CONCAT('W52', '-FY', (year(date_sub(store_in_date, 91)) - 1) % 100, year(date_sub(store_in_date, 91)) % 100)
- ELSE CONCAT('W', weekofyear(date_sub(store_in_date, 91)), '-FY', year(date_sub(store_in_date, 91)) % 100, year(date_sub(store_in_date, 91)) % 100 + 1) END store_in_week,
+ ELSE CONCAT('W', lpad(weekofyear(date_sub(store_in_date, 91)),2,0), '-FY', year(date_sub(store_in_date, 91)) % 100, year(date_sub(store_in_date, 91)) % 100 + 1) END week,
 first(brand) brand,
 first(product_group_code) product_group_code,
 sum(quantity) quantity,
@@ -304,21 +327,13 @@ first(purchase_date) purchase_date
 from transfer
 GROUP BY 1,2,3"""
 
-'''store_out,
-CASE WHEN store_out_date = to_date('2019/03/31', 'yyyy/MM/dd')
- THEN CONCAT('W1', '-FY', (year(date_sub(store_out_date, 91)) + 1) % 100, year(date_sub(store_out_date, 91)) % 100 + 2)
- WHEN store_out_date = to_date('2019/04/01', 'yyyy/MM/dd')
- THEN CONCAT('W52', '-FY', (year(date_sub(store_out_date, 91)) - 1) % 100, year(date_sub(store_out_date, 91)) % 100)
- ELSE CONCAT('W', weekofyear(date_sub(store_out_date, 91)), '-FY', year(date_sub(store_out_date, 91)) % 100, year(date_sub(store_out_date, 91)) % 100 + 1) END store_out_week,'''
-
 transfer_weekly = sqlContext.sql(transfer_weekly_query)
 transfer_weekly.createOrReplaceTempView("transfer_weekly")
 
 transfer_in_join_query = """select
     CASE WHEN a.location_code is not null THEN a.location_code ELSE b.store_in END location_code,
     CASE WHEN a.item_no is not null THEN a.item_no ELSE b.item_no END item_no,
-    CASE WHEN a.closing_week is not null THEN a.closing_week ELSE b.store_in_week END closing_week,
-    a.purchase_week purchase_week,
+    CASE WHEN a.week is not null THEN a.week ELSE b.week END week,
     a.closing_date closing_date,
     CASE WHEN a.brand is not null THEN a.brand ELSE b.brand END brand,
     a.department,
@@ -331,7 +346,6 @@ transfer_in_join_query = """select
     a.stock_prevailing_mrp stock_prevailing_mrp,
     a.state state,
     a.region region,
-    b.store_in_week store_in_week,
     b.store_in store_in,
     b.product_group_code,
     b.cost_amount transfer_cost_amount,
@@ -339,9 +353,9 @@ transfer_in_join_query = """select
     from purchase_join a FULL OUTER JOIN transfer_weekly b
     ON a.location_code = b.store_in
     AND a.item_no = b.item_no
-    AND b.store_in_week = a.closing_week
-    
-    """
+   AND b.week = a.week
+   """
+   
 transfer_in_join = sqlContext.sql(transfer_in_join_query)
 transfer_in_join.createOrReplaceTempView("transfer_in_join") 
 
@@ -350,10 +364,11 @@ sales_weekly_query = """select
  b.item_no item_no,
  b.location_code location_code,
  CASE  WHEN sales_date = to_date('2019/03/31', 'yyyy/MM/dd')
- THEN CONCAT('W1', '-FY', (year(date_sub(sales_date, 91)) + 1) % 100, year(date_sub(sales_date, 91)) % 100 + 2)
+ THEN CONCAT('W01', '-FY', (year(date_sub(sales_date, 91))) % 100, year(date_sub(sales_date, 91)) % 100 + 1)
  WHEN sales_date = to_date('2019/04/01', 'yyyy/MM/dd')
  THEN CONCAT('W52', '-FY', (year(date_sub(sales_date, 91)) - 1) % 100, year(date_sub(sales_date, 91)) % 100)
- ELSE CONCAT('W', weekofyear(date_sub(sales_date, 91)), '-FY', year(sales_date) % 100, year(sales_date) % 100 + 1) END sales_week,
+ ELSE CONCAT('W', lpad(weekofyear(date_sub(sales_date, 91)),2,0), '-FY', year(date_sub(sales_date, 91)) % 100, year(date_sub(sales_date, 91)) % 100 + 1) END week,
+ 
  first(b.sales_department) sales_department,
  count(b.customer_no) num_of_customers,
  sum(b.quantity) quantity,
@@ -372,14 +387,14 @@ sales_weekly_query = """select
 from sales b
 group by 1,2,3
 """
-sales_weekly = sqlContext.sql(sales_weekly_query).createOrReplaceTempView("sales_weekly")
+sales_weekly = sqlContext.sql(sales_weekly_query)
+sales_weekly.createOrReplaceTempView("sales_weekly")
 
 sales_join_data_query = """SELECT
     CASE WHEN a.location_code is not null THEN a.location_code ELSE b.location_code END location_code,
     CASE WHEN a.item_no is not null THEN a.item_no ELSE b.item_no END item_no,
+    CASE WHEN a.week is not null THEN a.week ELSE b.week END week,
     a.closing_date closing_date,
-    a.purchase_week purchase_week,
-    a.closing_week closing_week,
     a.brand brand,
     a.department,
     a.quantity quantity,
@@ -392,12 +407,10 @@ sales_join_data_query = """SELECT
     a.stock_prevailing_mrp stock_prevailing_mrp,
     a.state state,
     a.region region,
-    a.store_in_week store_in_week,
     a.store_in store_in,
     a.product_group_code,
     a.transfer_cost_amount transfer_cost_amount,
     a.transfer_mrp transfer_mrp,
-    b.sales_week sales_week,
     b.sales_department sales_department,
     DATEDIFF(a.closing_date, a.purchase_date) days_to_sell,
     b.num_of_customers,
@@ -416,24 +429,21 @@ sales_join_data_query = """SELECT
 from transfer_in_join a FULL OUTER JOIN sales_weekly b
 ON a.location_code = b.location_code
 AND a.item_no = b.item_no
-AND b.sales_week = a.closing_week
+AND b.week = a.week
 """
 sales_join = sqlContext.sql(sales_join_data_query)
 sales_join.createOrReplaceTempView("sales_join")
 
 
-## Join item master and store master
-
-purchase_store_master = sales_join.join(store_master, store_master.store_code == sales_join.location_code, how='left')
-purchase_store_master.createOrReplaceTempView("purchase_store_master")
-# purchase_item_master = purchase_store_master.join(item_master, purchase_store_master.item_no == item_master.item_no)
+## Join item master and store masterstore_join = sales_join.join(store_master, store_master.store_code == sales_join.location_code, how='left').drop('store_code')
+store_join.createOrReplaceTempView("store_join")
 
 store_join = sales_join.join(store_master, store_master.store_code == sales_join.location_code, how='left').drop('store_code')
 store_join.createOrReplaceTempView("store_join")
 
 
 item_join_query = """select a.*,
- b.case_size,
+    float(split(b.case_size, ' ')[0]) case_size,
     b.case_size_range,
     b.gender,
     b.movement,
@@ -451,8 +461,12 @@ ON a.item_no = b.item_no
 
 ethos_transaction_summary = sqlContext.sql(item_join_query)
 
+transfer_in_join.select('week', 'closing_date').distinct().show(100)
+#ethos_transaction_summary.select('week', 'closing_date').distinct().show(100)
 
-ethos_transaction_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'ethos_transaction_summary.csv',header = 'true')
+#ethos_transaction_summary.groupBy().sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity').show()
+
+# ethos_transaction_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'ethos_transaction_summary.csv',header = 'true')
 ### -------- JOIN LOGIC ENDS HERE --- ONLY TESTING and TALLYING BELOW ------- ####
  
 '''
@@ -485,7 +499,7 @@ unique_items_in_transactional_data.subtract(unique_items_in_transactional_data.i
 +-------------+
 
 >>> transfer_table.groupBy().sum('mrp', 'quantity').show()
-+--------------------+-------------+
++--------------------+-------------+215
 |            sum(mrp)|sum(quantity)|
 +--------------------+-------------+
 |2.548899039574707E10|       185772|
@@ -608,6 +622,22 @@ pyspark --num-executors 5 --driver-memory 3g --executor-memory 3g
 #AND DATEDIFF(a.closing_date,b.store_in_date) < 7
 
 purchase_store_master.join(item_master, purchase_store_master.item_no == item_master.item_no, how='left').select(purchase_store_master['item_no'], 'case_size_range', 'gender', 'movement', 'material', 'dial_color', 'strap_type', 'strap_color', 'precious_stone', 'glass', 'case_shape', 'watch_type')
+
+closing_sql = """SELECT
+`Location Code` location_code,
+`Item No_` item_no,
+first(`Brand`) brand,
+first(`Department`) department,
+sum(cast(Quantity as int)) quantity,
+sum(float(`Cost Amount`)) cost_amount,
+sum(float(`Purchase MRP`)) purchase_mrp,
+sum(float(`Prevailing MRP as on Stock Date`)) stock_prevailing_mrp,
+first(to_date(`Purchase Date`, 'yyyy/MM/dd')) purchase_date,
+first(`State`) state,
+first(`Region`) region,
+to_date(closing_date, 'yyyy/MM/dd') closing_date
+from closing_stock_raw
+group by item_no, location_code,closing_date"""
 '''
 
 
