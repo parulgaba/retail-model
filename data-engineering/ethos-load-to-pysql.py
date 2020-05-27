@@ -73,7 +73,7 @@ Condition being item_no, location_code, [sales_date in closing_week or ______CON
 sales3 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Sale Data 01.04.19 to 31.03.20.csv")
 sales2 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Sale Data 01.04.17 to 31.03.18.csv")
 sales1 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Sale Data 01.04.18 to 31.03.19.csv")
-sales_data = sales1.unionAll(sales2).unionAll(sales3)
+sales_data = sales1.unionAll(sales2)
 
 
 purchase1 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Purchase_Data_01.04.17_to_31.03.18.csv")
@@ -92,14 +92,12 @@ purchase_data.createOrReplaceTempView("purchase_raw")
 transfer_data.createOrReplaceTempView("transfer_raw")
    
 # Load master data
-store_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "store_master.csv")
 item_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Item_Attributes_Encoded_final.csv")
 item_master = item_master.drop('s_no')
 item_master_old = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Item_Master.csv")
 item_master = item_master.unionAll(item_master_old)
 item_master = item_master.dropDuplicates(subset = ['item_no'])
 
-store_master.createOrReplaceTempView("store_master")
 item_master.createOrReplaceTempView("item_master") 
 # load weekly closing data
 weekly_closing_dir_path = '/Users/parulgaba/Desktop/Capstone-Ethos/Encoded/weekly-closing-stock/'
@@ -147,16 +145,60 @@ for f in glob.glob(path):
     
 ## Aggregate duplicate closing tock file by item_no,location_code,closing_date 
 
+###CASE WHEN to_date(closing_date, 'yyyy/MM/dd') = to_date('2019/03/31', 'yyyy/MM/dd')
+## THEN CONCAT('W01', '-FY', (year(date_sub(closing_date, 90))) % 100 + 1, year(date_sub(closing_date, 90)) % 100 + 2)
+## ELSE sdssdf END
 
-
+filepath = '/Users/parulgaba/Desktop/Capstone-Ethos/ethos-retail-model/data-engineering/ethos-load-to-pysql.py'
 """
+
+dirpath = '/Users/parulgaba/Desktop/Capstone-Ethos/ConfidentialData/csvdata/'
+
+data_path = '/Users/parulgaba/Desktop/Capstone-Ethos/ethos-retail-model/data/'
+
+sales3 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Sale Data 01.04.19 to 31.03.20.csv")
+sales2 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Sale Data 01.04.17 to 31.03.18.csv")
+sales1 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Sale Data 01.04.18 to 31.03.19.csv")
+sales_data = sales1.unionAll(sales2)
+
+
+purchase1 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Purchase_Data_01.04.17_to_31.03.18.csv")
+purchase2 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Purchase_Data_01.04.18_to_31.03.19.csv")
+purchase3 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Purchase_Data_01.04.19_to_06.02.2020.csv")
+purchase_data = purchase1.unionAll(purchase2).unionAll(purchase3)
+
+transfer1 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Transfer_Data_01.04.17_to_31.03.18.csv")
+transfer2 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Transfer_Data_01.04.18_to_31.03.19.csv")
+transfer3 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Transfer_Data_01.04.19_to_06.02.2020.csv")
+transfer_data = transfer1.unionAll(transfer2).unionAll(transfer3)
+
+
+sales_data.createOrReplaceTempView("sales_raw")
+purchase_data.createOrReplaceTempView("purchase_raw")
+transfer_data.createOrReplaceTempView("transfer_raw")
+   
+# Load master data
+item_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Item_Attributes_Encoded_final.csv")
+item_master = item_master.drop('s_no')
+item_master_old = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Item_Master.csv")
+item_master = item_master.unionAll(item_master_old)
+item_master = item_master.dropDuplicates(subset = ['item_no'])
+
+item_master.createOrReplaceTempView("item_master") 
+
+weekly_closing_output_path = data_path + 'closing_stock_data.csv'
+
+closing_stock_data = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(weekly_closing_output_path)
+closing_stock_data.createOrReplaceTempView("closing_stock_raw")
 
 closing_sql = """select
 location_code,
 item_no,
 to_date(closing_date, 'yyyy/MM/dd') closing_date,
-CASE WHEN to_date(closing_date, 'yyyy/MM/dd') = to_date('2019/03/31', 'yyyy/MM/dd')
-THEN CONCAT('W01', '-FY', (year(date_sub(closing_date, 90)) + 1) % 100, year(date_sub(closing_date, 90)) % 100 + 2)
+CASE WHEN closing_date = to_date('2019/03/31', 'yyyy/MM/dd')
+ THEN 'W01-FY1920'
+ WHEN closing_date = to_date('2020/03/29', 'yyyy/MM/dd')
+ THEN 'W53-FY1920'
 ELSE CONCAT('W', lpad(weekofyear(date_sub(closing_date, 90)),2,0), '-FY', year(date_sub(closing_date, 90)) % 100, year(date_sub(closing_date, 90)) % 100 + 1) END week,
 first(brand) brand,
 first(department) department,
@@ -204,7 +246,8 @@ where `Date` is not null
 group by 1,2,3
 '''
 
-sales3.createOrReplaceTempView("sales_3")
+sales3.createOrReplaceTempView("sales3")
+
 sales3_sql = """
 select
      `Store No_` location_code,
@@ -229,16 +272,23 @@ select
      sum(float(`Total Contribution`)) total_contribution,
      first(`State`) state,
      first(`Region`) region
-from sales_3
+from sales3
 where `Date` is not null
 group by 1,2,3
 """
+
 # CONCAT('W', weekofyear(to_date(`Date`, 'yyyy/MM/dd')), '-FY', year(to_date(`Date`, 'yyyy/MM/dd')) % 100, year(to_date(`Date`, 'yyyy/MM/dd')) % 100 + 1) week
 
 sales_table = sqlContext.sql(sales_sql)
 sales_table.createOrReplaceTempView("sales")
 
 sales_3_data = sqlContext.sql(sales3_sql)
+
+sales_3_data.createOrReplaceTempView("sales_3")
+
+sales_table = sales_table.unionAll(sales_3_data)
+
+sales_table.createOrReplaceTempView("sales")
 
 
 purchase_sql = """select
@@ -266,19 +316,31 @@ transfer_table.createOrReplaceTempView("transfer")
 
 # WEEKLY SUMMARY
 # lpad(weekofyear(date_sub(store_in_date, 91)), 2, 0)
+# WHEN posting_date = to_date('2019/03/31', 'yyyy/MM/dd')
+# THEN CONCAT('W01', '-FY1920')
 purchase_weekly_query = """SELECT
  location_code,
  item_no,
- CASE WHEN posting_date = to_date('2019/03/31', 'yyyy/MM/dd')
- THEN CONCAT('W01', '-FY', (year(date_sub(posting_date, 91)) + 1) % 100, year(date_sub(posting_date, 91)) % 100 + 2)
- WHEN posting_date = to_date('2019/04/01', 'yyyy/MM/dd')
- THEN CONCAT('W52', '-FY', (year(date_sub(posting_date, 91)) - 1) % 100, year(date_sub(posting_date, 91)) % 100)
+  CASE WHEN posting_date = to_date('2019/03/31', 'yyyy/MM/dd')
+ THEN 'W52-FY1819'
+    WHEN posting_date = to_date('2020/03/29', 'yyyy/MM/dd')
+ THEN 'W52-FY1920'
+   WHEN posting_date = to_date('2020/03/30', 'yyyy/MM/dd')
+ THEN 'W53-FY1920'
+    WHEN posting_date = to_date('2020/03/31', 'yyyy/MM/dd')
+ THEN 'W53-FY1920'
+    WHEN posting_date = to_date('2017/04/02', 'yyyy/MM/dd')
+ THEN 'W52-FY1617'
+  WHEN posting_date = to_date('2019/04/01', 'yyyy/MM/dd')
+ THEN 'W01-FY1920'
  ELSE CONCAT('W', lpad(weekofyear(date_sub(posting_date, 91)),2,0), '-FY', year(date_sub(posting_date, 91)) % 100, year(date_sub(posting_date, 91)) % 100 + 1) END week,
  first(brand) brand,
  first(department) department,
  sum(quantity) quantity,
  sum(purchase_mrp) purchase_mrp,
- sum(cost_amount) cost_amount
+ sum(cost_amount) cost_amount,
+ first(state_code) state,
+ first(region) region
 from purchase
 GROUP BY 1,2,3
 """
@@ -294,14 +356,14 @@ SELECT
      a.closing_date closing_date,
      CASE WHEN a.brand is not null THEN a.brand ELSE b.brand END brand,
      CASE WHEN a.department is not null THEN a.brand ELSE b.department END department,
+     CASE WHEN a.state is not null THEN a.state ELSE b.state END state,
+     CASE WHEN a.region is not null THEN a.region ELSE b.region END region,
      a.quantity quantity,
      b.quantity purchase_quantity,
      a.cost_amount purchase_cost_amount,
      a.purchase_mrp purchase_mrp,
      a.purchase_date purchase_date,
-     a.stock_prevailing_mrp stock_prevailing_mrp,
-     a.state state,
-     a.region region
+     a.stock_prevailing_mrp stock_prevailing_mrp
     from closing_stock a FULL OUTER JOIN purchase_weekly b
 ON a.location_code = b.location_code
 AND a.item_no = b.item_no
@@ -313,17 +375,27 @@ purchase_join.createOrReplaceTempView("purchase_join")
 transfer_weekly_query = """SELECT
  item_no,
  store_in,
-CASE WHEN store_in_date = to_date('2019/03/31', 'yyyy/MM/dd')
- THEN CONCAT('W01', '-FY', (year(date_sub(store_in_date, 91)) + 1) % 100, year(date_sub(store_in_date, 91)) % 100 + 2)
- WHEN store_in_date = to_date('2019/04/01', 'yyyy/MM/dd')
- THEN CONCAT('W52', '-FY', (year(date_sub(store_in_date, 91)) - 1) % 100, year(date_sub(store_in_date, 91)) % 100)
+  CASE WHEN store_in_date = to_date('2019/03/31', 'yyyy/MM/dd')
+ THEN 'W52-FY1819'
+   WHEN store_in_date = to_date('2020/03/29', 'yyyy/MM/dd')
+ THEN 'W52-FY1920'
+   WHEN store_in_date = to_date('2020/03/30', 'yyyy/MM/dd')
+ THEN 'W53-FY1920'
+    WHEN store_in_date = to_date('2020/03/31', 'yyyy/MM/dd')
+ THEN 'W53-FY1920'
+      WHEN store_in_date = to_date('2017/04/02', 'yyyy/MM/dd')
+ THEN 'W52-FY1617'
+   WHEN store_in_date = to_date('2019/04/01', 'yyyy/MM/dd')
+ THEN 'W01-FY1920'
  ELSE CONCAT('W', lpad(weekofyear(date_sub(store_in_date, 91)),2,0), '-FY', year(date_sub(store_in_date, 91)) % 100, year(date_sub(store_in_date, 91)) % 100 + 1) END week,
 first(brand) brand,
 first(product_group_code) product_group_code,
 sum(quantity) quantity,
 sum(cost_amount) cost_amount,
 sum(mrp) mrp,
-first(purchase_date) purchase_date
+first(purchase_date) purchase_date,
+ first(state) state,
+ first(region) region
 from transfer
 GROUP BY 1,2,3"""
 
@@ -336,6 +408,8 @@ transfer_in_join_query = """select
     CASE WHEN a.week is not null THEN a.week ELSE b.week END week,
     a.closing_date closing_date,
     CASE WHEN a.brand is not null THEN a.brand ELSE b.brand END brand,
+    CASE WHEN a.state is not null THEN a.state ELSE b.state END state,
+    CASE WHEN a.region is not null THEN a.region ELSE b.region END region,
     a.department,
     a.quantity quantity,
     a.purchase_quantity purchase_quantity,
@@ -344,8 +418,6 @@ transfer_in_join_query = """select
     a.purchase_mrp purchase_mrp,
     a.purchase_date purchase_date,
     a.stock_prevailing_mrp stock_prevailing_mrp,
-    a.state state,
-    a.region region,
     b.store_in store_in,
     b.product_group_code,
     b.cost_amount transfer_cost_amount,
@@ -363,12 +435,19 @@ transfer_in_join.createOrReplaceTempView("transfer_in_join")
 sales_weekly_query = """select
  b.item_no item_no,
  b.location_code location_code,
- CASE  WHEN sales_date = to_date('2019/03/31', 'yyyy/MM/dd')
- THEN CONCAT('W01', '-FY', (year(date_sub(sales_date, 91))) % 100, year(date_sub(sales_date, 91)) % 100 + 1)
- WHEN sales_date = to_date('2019/04/01', 'yyyy/MM/dd')
- THEN CONCAT('W52', '-FY', (year(date_sub(sales_date, 91)) - 1) % 100, year(date_sub(sales_date, 91)) % 100)
+ CASE WHEN sales_date = to_date('2019/03/31', 'yyyy/MM/dd')
+ THEN 'W52-FY1819'
+  WHEN sales_date = to_date('2020/03/29', 'yyyy/MM/dd')
+ THEN 'W52-FY1920'
+   WHEN sales_date = to_date('2020/03/30', 'yyyy/MM/dd')
+ THEN 'W53-FY1920'
+    WHEN sales_date = to_date('2020/03/31', 'yyyy/MM/dd')
+ THEN 'W53-FY1920'
+     WHEN sales_date = to_date('2017/04/02', 'yyyy/MM/dd')
+ THEN 'W52-FY1617'
+    WHEN sales_date = to_date('2019/04/01', 'yyyy/MM/dd')
+ THEN 'W01-FY1920'
  ELSE CONCAT('W', lpad(weekofyear(date_sub(sales_date, 91)),2,0), '-FY', year(date_sub(sales_date, 91)) % 100, year(date_sub(sales_date, 91)) % 100 + 1) END week,
- 
  first(b.sales_department) sales_department,
  count(b.customer_no) num_of_customers,
  sum(b.quantity) quantity,
@@ -383,7 +462,9 @@ sales_weekly_query = """select
  sum(b.contribution) contribution,
  sum(b.trade_incentive) trade_incentive,
  sum(b.trade_incentive_value) trade_incentive_value,
- sum(b.total_contribution) total_contribution
+ sum(b.total_contribution) total_contribution,
+  first(state) state,
+ first(region) region
 from sales b
 group by 1,2,3
 """
@@ -395,6 +476,8 @@ sales_join_data_query = """SELECT
     CASE WHEN a.item_no is not null THEN a.item_no ELSE b.item_no END item_no,
     CASE WHEN a.week is not null THEN a.week ELSE b.week END week,
     a.closing_date closing_date,
+    CASE WHEN a.state is not null THEN a.state ELSE b.state END state,
+    CASE WHEN a.region is not null THEN a.region ELSE b.region END region,
     a.brand brand,
     a.department,
     a.quantity quantity,
@@ -405,8 +488,6 @@ sales_join_data_query = """SELECT
     a.purchase_mrp purchase_mrp,
     a.purchase_date purchase_date,
     a.stock_prevailing_mrp stock_prevailing_mrp,
-    a.state state,
-    a.region region,
     a.store_in store_in,
     a.product_group_code,
     a.transfer_cost_amount transfer_cost_amount,
@@ -436,11 +517,14 @@ sales_join.createOrReplaceTempView("sales_join")
 
 
 ## Join item master and store masterstore_join = sales_join.join(store_master, store_master.store_code == sales_join.location_code, how='left').drop('store_code')
-store_join.createOrReplaceTempView("store_join")
+
+store_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "store_master.csv")
+store_master = store_master.drop('state', 'region')
+# store_regions = sales_join.filter("region is not null and state is not null").select('location_code', 'region', 'state').distinct()
+# store_master = store_master.join(store_regions, store_master.store_code == store_regions.location_code, how = 'left').drop('location_code')
 
 store_join = sales_join.join(store_master, store_master.store_code == sales_join.location_code, how='left').drop('store_code')
 store_join.createOrReplaceTempView("store_join")
-
 
 item_join_query = """select a.*,
     float(split(b.case_size, ' ')[0]) case_size,
@@ -461,10 +545,19 @@ ON a.item_no = b.item_no
 
 ethos_transaction_summary = sqlContext.sql(item_join_query)
 
-transfer_in_join.select('week', 'closing_date').distinct().show(100)
+# transfer_in_join.select('week', 'closing_date').distinct().show(100)
 #ethos_transaction_summary.select('week', 'closing_date').distinct().show(100)
 
-#ethos_transaction_summary.groupBy().sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity').show()
+print('Done\n\n Done.')
+
+ethos_transaction_summary.groupBy().sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity').show()
+
+ethos_transaction_summary.filter("week like 'W52-%'").groupBy('week').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity').show()
+ethos_transaction_summary.filter("week like 'W01-%'").groupBy('week').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity').show()
+
+store_regions = ethos_transaction_summary.filter("region is null or state is null").select('location_code', 'region', 'state').distinct()
+store_regions.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'stores_without_region.csv',header = 'true')
+ethos_transaction_summary.groupBy('week').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity').repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'test_weekly.csv',header = 'true')
 
 # ethos_transaction_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'ethos_transaction_summary.csv',header = 'true')
 ### -------- JOIN LOGIC ENDS HERE --- ONLY TESTING and TALLYING BELOW ------- ####
@@ -498,7 +591,7 @@ unique_items_in_transactional_data.subtract(unique_items_in_transactional_data.i
 |      6802945|
 +-------------+
 
->>> transfer_table.groupBy().sum('mrp', 'quantity').show()
+>>> transfer_table.groupBy().sum('quantity').show()
 +--------------------+-------------+215
 |            sum(mrp)|sum(quantity)|
 +--------------------+-------------+
@@ -638,6 +731,28 @@ first(`Region`) region,
 to_date(closing_date, 'yyyy/MM/dd') closing_date
 from closing_stock_raw
 group by item_no, location_code,closing_date"""
+
+
+sales_test_sql = """select 
+CASE WHEN sales_date = to_date('2019/03/31', 'yyyy/MM/dd')
+ THEN 'W52-FY1819'
+  WHEN sales_date = to_date('2020/03/29', 'yyyy/MM/dd')
+ THEN 'W52-FY1920'
+   WHEN sales_date = to_date('2020/03/30', 'yyyy/MM/dd')
+ THEN 'W53-FY1920'
+    WHEN sales_date = to_date('2020/03/31', 'yyyy/MM/dd')
+ THEN 'W53-FY1920'
+     WHEN sales_date = to_date('2017/04/02', 'yyyy/MM/dd')
+ THEN 'W52-FY1617'
+    WHEN sales_date = to_date('2019/04/01', 'yyyy/MM/dd')
+ THEN 'W01-FY1920'
+ ELSE CONCAT('W', lpad(weekofyear(date_sub(sales_date, 91)),2,0), '-FY', year(date_sub(sales_date, 91)) % 100, year(date_sub(sales_date, 91)) % 100 + 1) END week,
+ sales_date
+ from sales
+"""
+
+sales_test = sqlContext.sql(sales_test_sql)
+
 '''
 
 
