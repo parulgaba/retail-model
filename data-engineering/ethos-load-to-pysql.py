@@ -363,7 +363,7 @@ SELECT
      a.cost_amount purchase_cost_amount,
      a.purchase_mrp purchase_mrp,
      a.purchase_date purchase_date,
-     a.stock_prevailing_mrp stock_prevailing_mrp
+     CASE when a.stock_prevailing_mrp is not null THEN a.stock_prevailing_mrp ELSE b.purchase_mrp END stock_prevailing_mrp
     from closing_stock a FULL OUTER JOIN purchase_weekly b
 ON a.location_code = b.location_code
 AND a.item_no = b.item_no
@@ -417,11 +417,10 @@ transfer_in_join_query = """select
     a.purchase_cost_amount purchase_cost_amount,
     a.purchase_mrp purchase_mrp,
     a.purchase_date purchase_date,
-    a.stock_prevailing_mrp stock_prevailing_mrp,
+    CASE when a.stock_prevailing_mrp is not null THEN a.stock_prevailing_mrp ELSE b.mrp END stock_prevailing_mrp,
     b.store_in store_in,
     b.product_group_code,
-    b.cost_amount transfer_cost_amount,
-    b.mrp transfer_mrp
+    b.cost_amount transfer_cost_amount
     from purchase_join a FULL OUTER JOIN transfer_weekly b
     ON a.location_code = b.store_in
     AND a.item_no = b.item_no
@@ -487,15 +486,13 @@ sales_join_data_query = """SELECT
     a.purchase_cost_amount purchase_cost_amount,
     a.purchase_mrp purchase_mrp,
     a.purchase_date purchase_date,
-    a.stock_prevailing_mrp stock_prevailing_mrp,
+    CASE when a.stock_prevailing_mrp is not null THEN a.stock_prevailing_mrp ELSE b.price END stock_prevailing_mrp,
     a.store_in store_in,
     a.product_group_code,
     a.transfer_cost_amount transfer_cost_amount,
-    a.transfer_mrp transfer_mrp,
     b.sales_department sales_department,
     DATEDIFF(a.closing_date, a.purchase_date) days_to_sell,
     b.num_of_customers,
-    b.price sales_price,
     b.total_price total_price,
     b.line_discount line_discount,
     b.crm_line_discount crm_line_discount,
@@ -524,9 +521,14 @@ store_master = store_master.drop('state', 'region')
 # store_master = store_master.join(store_regions, store_master.store_code == store_regions.location_code, how = 'left').drop('location_code')
 
 store_join = sales_join.join(store_master, store_master.store_code == sales_join.location_code, how='left').drop('store_code')
+store_join = store_join.na.fill(0)
+
 store_join.createOrReplaceTempView("store_join")
 
 item_join_query = """select a.*,
+    (a.quantity + a.purchase_quantity + a.transfer_quantity) available_quantity,
+    substr(a.week, 0, 3) week_no,
+    substr(a.week, 4) year,
     float(split(b.case_size, ' ')[0]) case_size,
     b.case_size_range,
     b.gender,
@@ -550,15 +552,21 @@ ethos_transaction_summary = sqlContext.sql(item_join_query)
 
 print('Done\n\n Done.')
 
-ethos_transaction_summary.groupBy().sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity').show()
+ethos_transaction_summary.groupBy().sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity', 'available_quantity').show()
 
-ethos_transaction_summary.filter("week like 'W52-%'").groupBy('week').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity').show()
-ethos_transaction_summary.filter("week like 'W01-%'").groupBy('week').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity').show()
+ethos_transaction_summary.filter("week like 'W52-%'").groupBy('week').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity', 'available_quantity').show()
+ethos_transaction_summary.filter("week like 'W01-%'").groupBy('week').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity', 'available_quantity').show()
 
-store_regions = ethos_transaction_summary.filter("region is null or state is null").select('location_code', 'region', 'state').distinct()
-store_regions.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'stores_without_region.csv',header = 'true')
-ethos_transaction_summary.groupBy('week').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity').repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'test_weekly.csv',header = 'true')
+#store_regions = ethos_transaction_summary.filter("region is null or state is null").select('location_code', 'region', 'state').distinct()
+#store_regions.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'stores_without_region.csv',header = 'true')
 
+#ethos_weekly = ethos_transaction_summary.groupBy('week').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity')
+#ethos_weekly.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'test_weekly.csv',header = 'true')
+
+
+ethos_transaction_summary.groupBy('region').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity', 'available_quantity').show()
+
+ethos_transaction_summary.select([count(when(col(c).isNull(), c)).alias(c) for c in ethos_transaction_summary.columns]).show()
 # ethos_transaction_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'ethos_transaction_summary.csv',header = 'true')
 ### -------- JOIN LOGIC ENDS HERE --- ONLY TESTING and TALLYING BELOW ------- ####
  
