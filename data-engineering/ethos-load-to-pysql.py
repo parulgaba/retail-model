@@ -92,7 +92,7 @@ purchase_data.createOrReplaceTempView("purchase_raw")
 transfer_data.createOrReplaceTempView("transfer_raw")
    
 # Load master data
-item_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Item_Attributes_Encoded_final.csv")
+item_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "combined_item_master_deduped.csv")
 item_master = item_master.drop('s_no')
 item_master_old = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Item_Master.csv")
 item_master = item_master.unionAll(item_master_old)
@@ -105,7 +105,7 @@ weekly_closing_file_path = weekly_closing_dir_path + '*.csv'
 
 weekly_closing_output_path = data_path + 'closing_stock_data.csv'
 
-ethos_transaction_summary = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(data_path + 'ethos_transaction_summary_v2.csv')
+ethos_transaction_summary = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(data_path + 'ethos_transaction_summary.csv')
 
 # Before reading closing stock, add closing date column to the files using file name.
 # Ideally date must be put along with other cloumns while generatin closing stock data
@@ -178,12 +178,13 @@ purchase_data.createOrReplaceTempView("purchase_raw")
 transfer_data.createOrReplaceTempView("transfer_raw")
    
 # Load master data
-item_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Item_Attributes_Encoded_final.csv")
-item_master = item_master.drop('s_no')
-item_master_old = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Item_Master.csv")
-item_master = item_master.unionAll(item_master_old)
+item_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + 'item_master_imputed.csv')
+#item_master = item_master.drop('s_no')
+#item_master_old = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Item_Master.csv")
+#item_master = item_master.unionAll(item_master_old)
 item_master = item_master.dropDuplicates(subset = ['item_no'])
 
+item_master = item_master.drop('strap_color_imp', 'case_size_range_imp', 'glass_imp', 'dial_color_imp', 'strap_type_imp', 'case_shape_imp', 'material_imp', 'case_size_imp', 'movement_imp')
 item_master.createOrReplaceTempView("item_master") 
 
 weekly_closing_output_path = data_path + 'closing_stock_data.csv'
@@ -528,8 +529,8 @@ store_join.createOrReplaceTempView("store_join")
 item_join_query = """select a.*,
     (a.quantity + a.purchase_quantity + a.transfer_quantity) available_quantity,
     substr(a.week, 0, 3) week_no,
-    substr(a.week, 4) year,
-    float(split(b.case_size, ' ')[0]) case_size,
+    substr(a.week, 5) year,
+    b.case_size case_size,
     b.case_size_range,
     b.gender,
     b.movement,
@@ -552,11 +553,14 @@ ethos_transaction_summary = sqlContext.sql(item_join_query)
 
 print('Done\n\n Done.')
 
+
 ethos_transaction_summary.groupBy().sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity', 'available_quantity').show()
 
 ethos_transaction_summary.filter("week like 'W52-%'").groupBy('week').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity', 'available_quantity').show()
 ethos_transaction_summary.filter("week like 'W01-%'").groupBy('week').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity', 'available_quantity').show()
 
+ethos_transaction_summary.select([count(when(col(c).isNull(), c)).alias(c) for c in ethos_transaction_summary.columns]).show()
+"""
 #store_regions = ethos_transaction_summary.filter("region is null or state is null").select('location_code', 'region', 'state').distinct()
 #store_regions.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'stores_without_region.csv',header = 'true')
 
@@ -567,6 +571,22 @@ ethos_transaction_summary.filter("week like 'W01-%'").groupBy('week').sum('quant
 ethos_transaction_summary.groupBy('region').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity', 'available_quantity').show()
 
 ethos_transaction_summary.select([count(when(col(c).isNull(), c)).alias(c) for c in ethos_transaction_summary.columns]).show()
+
+item_no_agg_summary = ethos_transaction_summary.groupBy('item_no').agg(sf.sum('stock_prevailing_mrp').alias('mrp'), sf.sum('sales_quantity').alias('sales_quantity'))
+
+item_master.select([count(when(col(c).isNull(), c)).alias(c) for c in item_master.columns]).show()
+
+item_master_filter = item_master.join(item_no_agg_summary, on='item_no', how='right_outer')
+
+
+
+item_master_filter = item_master_filter.fillna({ 'precious_stone': 'no' })
+item_master_filter.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'item_master_for_imputation.csv',header = 'true')
+
+new_df = item_master_filter.withColumn('null_cnt', reduce(lambda x, y: x + y, map(lambda x: sf.when(sf.isnull(sf.col(x)) == 'true', 1).otherwise(0), item_master_filter.schema.names)))
+
+new_df.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'abcd.csv',header = 'true')
+"""
 # ethos_transaction_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'ethos_transaction_summary.csv',header = 'true')
 ### -------- JOIN LOGIC ENDS HERE --- ONLY TESTING and TALLYING BELOW ------- ####
  
@@ -652,7 +672,7 @@ unique_items = ethos_transaction_summary.select('item_no', 'location_code').dist
 unique_items_week = ethos_transaction_summary.filter("closing_date == date'2019-09-08'").select('item_no', 'location_code').distinct()
 
 
-import pyspark.sql.functions as F
+import pyspark.sql.functions as sf
 sales_join = closing_stock_table.join(sales_table, on=['location_code', 'item_no'],how='left').filter(closing_stock_table.closing_date <= sales_table.sales_date).filter(sales_table.sales_date > F.date_add(closing_stock_table.closing_date, 7))
 
 temp = sqlContext.sql("""select * from sales_join where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd'))""")
