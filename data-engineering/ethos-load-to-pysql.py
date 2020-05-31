@@ -172,7 +172,7 @@ transfer2 = sqlContext.read.format("com.databricks.spark.csv").options(header='t
 transfer3 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Transfer_Data_01.04.19_to_06.02.2020.csv")
 transfer_data = transfer1.unionAll(transfer2).unionAll(transfer3)
 
-
+area_codes = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(data_path + "area_codes.csv")
 sales_data.createOrReplaceTempView("sales_raw")
 purchase_data.createOrReplaceTempView("purchase_raw")
 transfer_data.createOrReplaceTempView("transfer_raw")
@@ -547,20 +547,25 @@ ON a.item_no = b.item_no
 """
 
 ethos_transaction_summary = sqlContext.sql(item_join_query)
-
+ethos_transaction_summary = ethos_transaction_summary.drop('department').filter('brand is not null').filter('week is not null')
 # transfer_in_join.select('week', 'closing_date').distinct().show(100)
 #ethos_transaction_summary.select('week', 'closing_date').distinct().show(100)
 
 print('Done\n\n Done.')
 
+"""
+ethos_transaction_summary_sorted = ethos_transaction_summary.orderBy('week_no', 'year')
+ethos_transaction_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'summary_area_code.csv',header = 'true')
 
+#>>> path = '/Users/parulgaba/Desktop/Capstone-Ethos/ethos-retail-model/'
+# >>> execfile(path + 'data-engineering/ethos-load-to-pysql.py')
 ethos_transaction_summary.groupBy().sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity', 'available_quantity').show()
 
 ethos_transaction_summary.filter("week like 'W52-%'").groupBy('week').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity', 'available_quantity').show()
 ethos_transaction_summary.filter("week like 'W01-%'").groupBy('week').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity', 'available_quantity').show()
-
+execfile(path + 'data-engineering/ethos-load-to-pysql.py')
 ethos_transaction_summary.select([count(when(col(c).isNull(), c)).alias(c) for c in ethos_transaction_summary.columns]).show()
-"""
+
 #store_regions = ethos_transaction_summary.filter("region is null or state is null").select('location_code', 'region', 'state').distinct()
 #store_regions.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'stores_without_region.csv',header = 'true')
 
@@ -570,7 +575,7 @@ ethos_transaction_summary.select([count(when(col(c).isNull(), c)).alias(c) for c
 
 ethos_transaction_summary.groupBy('region').sum('quantity', 'purchase_quantity', 'transfer_quantity', 'sales_quantity', 'available_quantity').show()
 
-ethos_transaction_summary.select([count(when(col(c).isNull(), c)).alias(c) for c in ethos_transaction_summary.columns]).show()
+ethos_transaction_summary.select([sf.count(sf.when(sf.col(c).isNull(), c)).alias(c) for c in ethos_transaction_summary.columns]).show()
 
 item_no_agg_summary = ethos_transaction_summary.groupBy('item_no').agg(sf.sum('stock_prevailing_mrp').alias('mrp'), sf.sum('sales_quantity').alias('sales_quantity'))
 
@@ -587,7 +592,7 @@ new_df = item_master_filter.withColumn('null_cnt', reduce(lambda x, y: x + y, ma
 
 new_df.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'abcd.csv',header = 'true')
 """
-# ethos_transaction_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'ethos_transaction_summary.csv',header = 'true')
+# ethos_transaction_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'summary_after_imputation.csv',header = 'true')
 ### -------- JOIN LOGIC ENDS HERE --- ONLY TESTING and TALLYING BELOW ------- ####
  
 '''
