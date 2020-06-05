@@ -409,8 +409,8 @@ transfer_in_join_query = """select
     CASE WHEN a.week is not null THEN a.week ELSE b.week END week,
     a.closing_date closing_date,
     CASE WHEN a.brand is not null THEN a.brand ELSE b.brand END brand,
-    CASE WHEN a.state is not null THEN a.state ELSE b.state END state,
-    CASE WHEN a.region is not null THEN a.region ELSE b.region END region,
+    a.state,
+    a.region,
     a.department,
     a.quantity quantity,
     a.purchase_quantity purchase_quantity,
@@ -463,7 +463,7 @@ sales_weekly_query = """select
  sum(b.trade_incentive) trade_incentive,
  sum(b.trade_incentive_value) trade_incentive_value,
  sum(b.total_contribution) total_contribution,
-  first(state) state,
+ first(state) state,
  first(region) region
 from sales b
 group by 1,2,3
@@ -515,11 +515,15 @@ sales_join.createOrReplaceTempView("sales_join")
 
 
 ## Join item master and store masterstore_join = sales_join.join(store_master, store_master.store_code == sales_join.location_code, how='left').drop('store_code')
+# week_sales_date_mapping
+store_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(data_path + "store_master_with_state_and_regions.csv")
+# store_master = store_master.drop('state', 'region')
+store_master = store_master.drop('_c7', '_c8', '_c9')
 
-store_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "store_master.csv")
-store_master = store_master.drop('state', 'region')
 # store_regions = sales_join.filter("region is not null and state is not null").select('location_code', 'region', 'state').distinct()
-# store_master = store_master.join(store_regions, store_master.store_code == store_regions.location_code, how = 'left').drop('location_code')
+# store_master = store_master.join(store_regions, store_master.store_code == store_regions.location_code, how = 'left_outer').drop('location_code')
+
+sales_join = sales_join.drop('state', 'region')
 
 store_join = sales_join.join(store_master, store_master.store_code == sales_join.location_code, how='left').drop('store_code')
 store_join = store_join.na.fill(0)
@@ -547,7 +551,11 @@ ON a.item_no = b.item_no
 """
 
 ethos_transaction_summary = sqlContext.sql(item_join_query)
-ethos_transaction_summary = ethos_transaction_summary.drop('department').filter('brand is not null').filter('week is not null')
+ethos_transaction_summary = ethos_transaction_summary.filter('week is not null')
+
+ethos_transaction_summary = ethos_transaction_summary.join(area_codes, ethos_transaction_summary.state == area_codes.state_code, how='left')
+
+ethos_transaction_summary = ethos_transaction_summary.drop('state_code').drop('department')
 # transfer_in_join.select('week', 'closing_date').distinct().show(100)
 #ethos_transaction_summary.select('week', 'closing_date').distinct().show(100)
 
@@ -591,11 +599,12 @@ item_master_filter.repartition(1).write.format('com.databricks.spark.csv').save(
 new_df = item_master_filter.withColumn('null_cnt', reduce(lambda x, y: x + y, map(lambda x: sf.when(sf.isnull(sf.col(x)) == 'true', 1).otherwise(0), item_master_filter.schema.names)))
 
 new_df.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'abcd.csv',header = 'true')
-"""
+
+
 # ethos_transaction_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'summary_after_imputation.csv',header = 'true')
 ### -------- JOIN LOGIC ENDS HERE --- ONLY TESTING and TALLYING BELOW ------- ####
  
-'''
+
 ethos_transaction_summary.filter("closing_date = date'2020-02-02'").sum('sales_quantity', 'price', 'billing','transfer_quantity', 'purchase_quantity')
 
 #check corporate orders
@@ -677,11 +686,12 @@ unique_items = ethos_transaction_summary.select('item_no', 'location_code').dist
 unique_items_week = ethos_transaction_summary.filter("closing_date == date'2019-09-08'").select('item_no', 'location_code').distinct()
 
 
-import pyspark.sql.functions as sf
+sales_week_mapping.select(sf.col('sales_date'), sf.to_date(sf.col('sales_date'), "dd/mm/YY")).show()
+
 sales_join = closing_stock_table.join(sales_table, on=['location_code', 'item_no'],how='left').filter(closing_stock_table.closing_date <= sales_table.sales_date).filter(sales_table.sales_date > F.date_add(closing_stock_table.closing_date, 7))
 
-temp = sqlContext.sql("""select * from sales_join where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd'))""")
-sqlContext.sql("""select sales_date, weekofyear(sales_date), year(sales_date) from sales where DATEDIFF(sales_date, to_date('2018/07/29','yyyy/MM/dd')) < 7 and DATEDIFF(sales_date, to_date('2019/09/08','yyyy/MM/dd')) < 7""")
+temp = sqlContext.sql('''select * from sales_join where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd'))''')
+sqlContext.sql('''select sales_date, weekofyear(sales_date), year(sales_date) from sales where DATEDIFF(sales_date, to_date('2018/07/29','yyyy/MM/dd')) < 7 and DATEDIFF(sales_date, to_date('2019/09/08','yyyy/MM/dd')) < 7''')
 
 
 # Transfer to file
@@ -691,18 +701,18 @@ purchase_item_master.repartition(1).write.format('com.databricks.spark.csv').sav
 transfer_join.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'transfer_join.csv',header = 'true')
 
 
-sqlContext.sql("""select distinct closing_week, year from closing_stock where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd'))""").show()
+sqlContext.sql('''select distinct closing_week, year from closing_stock where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd'))''').show()
 
-sqlContext.sql("""select * from sales_weekly where sales_week in (30, 36) and sales_year in (2018, 2018)""").show()
+sqlContext.sql('''select * from sales_weekly where sales_week in (30, 36) and sales_year in (2018, 2018)''').show()
 
-sqlContext.sql("""select distinct * from closing_stock where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd')) and item_no in (5120031, 5121915) and location_code = 'S02'""").show()
+sqlContext.sql('''select distinct * from closing_stock where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd')) and item_no in (5120031, 5121915) and location_code = 'S02'''').show()
 
 
 sales_join = sqlContext.sql(sales_new_join_query)
 
 sales_join.createOrReplaceTempView("sales_join")
 
-temp = sqlContext.sql("""select * from purchase_join where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd'))""")
+temp = sqlContext.sql('''select * from purchase_join where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd'))''')
 
 
 #Subset
@@ -711,7 +721,7 @@ small_summary = transfer_join.filter("closing_date <= date'2020-02-02' and closi
 
 >>> sales_join = sqlContext.sql(sales_new_join_query)
 >>> sales_join.createOrReplaceTempView("sales_join")
->>> temp = sqlContext.sql("""select * from transfer_join where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd'))""")
+>>> temp = sqlContext.sql'''select * from transfer_join where closing_date in (to_date('2018/07/29','yyyy/MM/dd'), to_date('2019/09/08','yyyy/MM/dd'''
 
 
 
@@ -749,7 +759,7 @@ pyspark --num-executors 5 --driver-memory 3g --executor-memory 3g
 
 purchase_store_master.join(item_master, purchase_store_master.item_no == item_master.item_no, how='left').select(purchase_store_master['item_no'], 'case_size_range', 'gender', 'movement', 'material', 'dial_color', 'strap_type', 'strap_color', 'precious_stone', 'glass', 'case_shape', 'watch_type')
 
-closing_sql = """SELECT
+closing_sql = '''SELECT
 `Location Code` location_code,
 `Item No_` item_no,
 first(`Brand`) brand,
@@ -763,10 +773,10 @@ first(`State`) state,
 first(`Region`) region,
 to_date(closing_date, 'yyyy/MM/dd') closing_date
 from closing_stock_raw
-group by item_no, location_code,closing_date"""
+group by item_no, location_code,closing_date'''
 
 
-sales_test_sql = """select 
+sales_test_sql = '''select 
 CASE WHEN sales_date = to_date('2019/03/31', 'yyyy/MM/dd')
  THEN 'W52-FY1819'
   WHEN sales_date = to_date('2020/03/29', 'yyyy/MM/dd')
@@ -782,20 +792,53 @@ CASE WHEN sales_date = to_date('2019/03/31', 'yyyy/MM/dd')
  ELSE CONCAT('W', lpad(weekofyear(date_sub(sales_date, 91)),2,0), '-FY', year(date_sub(sales_date, 91)) % 100, year(date_sub(sales_date, 91)) % 100 + 1) END week,
  sales_date
  from sales
-"""
+'''
 
 sales_test = sqlContext.sql(sales_test_sql)
 
+
+sales_week = '''SELECT
+ item_no,
+ location_code,
+ CASE WHEN sales_date = to_date('2019/03/31', 'yyyy/MM/dd')
+ THEN 'W52-FY1819'
+  WHEN sales_date = to_date('2020/03/29', 'yyyy/MM/dd')
+ THEN 'W52-FY1920'
+   WHEN sales_date = to_date('2020/03/30', 'yyyy/MM/dd')
+ THEN 'W53-FY1920'
+    WHEN sales_date = to_date('2020/03/31', 'yyyy/MM/dd')
+ THEN 'W53-FY1920'
+     WHEN sales_date = to_date('2017/04/02', 'yyyy/MM/dd')
+ THEN 'W52-FY1617'
+    WHEN sales_date = to_date('2019/04/01', 'yyyy/MM/dd')
+ THEN 'W01-FY1920'
+ ELSE CONCAT('W', lpad(weekofyear(date_sub(sales_date, 91)),2,0), '-FY', year(date_sub(sales_date, 91)) % 100, year(date_sub(sales_date, 91)) % 100 + 1) END week,
+ sales_department,
+ customer_no,
+ quantity,
+ price,
+ total_price,
+ line_discount,
+ crm_line_discount,
+ discount,
+ tax,
+ cost,
+ billing,
+ contribution,
+ trade_incentive,
+ trade_incentive_value,
+ total_contribution,
+ state,
+ region
+ from sales
 '''
 
+ethos_transaction_summary.filter('region is null or state is null').select('location_code').distinct().repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'no_state_code.csv', header = 'true')
 
 
 
 
-
-
-
-
+"""
 
 
 
