@@ -268,7 +268,7 @@ from transfer_in_join a FULL OUTER JOIN sales b
  AND a.item_no = b.item_no
  AND b.sales_date > a.closing_date
  AND b.sales_date <= date_add(a.closing_date, 7*4)
- where b.sales_quantity <= 2
+ where b.quantity <= 2
 group by 1,2,3
 """ 
 
