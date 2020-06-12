@@ -126,8 +126,6 @@ for filename in os.listdir(stock_data_dir):
         # Col- 4 Year
         final_summ_file['Year'] = file_week.year
 
-        if file_week.month == 2 and file_week.year == 2020:
-            continue
 
         #merging for files with joining store data #I think its better to take state and region from weekly stock table
         merged_store_df = final_summ_file.merge(

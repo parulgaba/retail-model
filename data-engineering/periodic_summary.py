@@ -73,10 +73,12 @@ closing_stock_dates = closing_stock_table.select('closing_date').distinct().orde
 windowSpec = Window.orderBy("closing_date")
 closing_stock_dates = closing_stock_dates.withColumn("period_number",sf.row_number().over(windowSpec))
 
-input_period = 6
+input_period = 4
 period = 7 * input_period
 
 closing_stock_dates_filtered = closing_stock_dates.withColumn("mod", expr('period_number % {0}'.format(input_period))).filter("mod == 1")
+
+closing_stock_dates_filtered.show(30)
 # .select('closing_date')
 # closing_stock_dates_array = [int(row.closing_date) for row in closing_stock_dates.collect()]
 
@@ -192,7 +194,6 @@ purchase_join_query = """SELECT
     CASE WHEN a.location_code is not null THEN a.location_code ELSE b.location_code END location_code,
     CASE WHEN a.item_no is not null THEN a.item_no ELSE b.item_no END item_no,
     a.closing_date closing_date,
-    a.period_number period_number,
     first(a.purchase_date) purchase_date,
     first(b.posting_date) posting_date,
     CASE when avg(a.stock_prevailing_mrp) is not null THEN avg(a.stock_prevailing_mrp) ELSE avg(b.purchase_mrp) END stock_prevailing_mrp,
@@ -206,7 +207,7 @@ from closing_stock a FULL OUTER JOIN purchase b
     AND a.item_no = b.item_no
     AND b.posting_date > a.closing_date
     AND b.posting_date <= date_add(a.closing_date, {0})
-    group by 1,2,3,4
+    group by 1,2,3
 """.format(period)
 
 
@@ -217,7 +218,6 @@ transfer_join_query = """SELECT
     CASE WHEN a.location_code is not null THEN a.location_code ELSE b.store_in END location_code,
     CASE WHEN a.item_no is not null THEN a.item_no ELSE b.item_no END item_no,
     a.closing_date closing_date,
-    a.period_number period_number,
     first(a.purchase_date) purchase_date,
     first(a.posting_date) posting_date,
     first(b.store_in_date) store_in_date,
@@ -235,7 +235,7 @@ from purchase_join a FULL OUTER JOIN transfer b
     AND a.item_no = b.item_no
     AND b.store_in_date > a.closing_date
     AND b.store_in_date <= date_add(a.closing_date, {0})
-    group by 1,2,3,4
+group by 1,2,3
 """.format(period)
 
 transfer_in_join = sqlContext.sql(transfer_join_query)
@@ -245,7 +245,6 @@ sales_join_query = """SELECT
     CASE WHEN a.location_code is not null THEN a.location_code ELSE b.location_code END location_code,
     CASE WHEN a.item_no is not null THEN a.item_no ELSE b.item_no END item_no,
     a.closing_date closing_date,
-    a.period_number period_number,
     first(a.purchase_date) purchase_date,
     first(a.posting_date) posting_date,
     first(a.store_in_date) store_in_date,
@@ -276,10 +275,10 @@ from transfer_in_join a FULL OUTER JOIN sales b
  AND a.item_no = b.item_no
  AND b.sales_date > a.closing_date
  AND b.sales_date <= date_add(a.closing_date, {0})
- where b.quantity <= 2
-group by 1,2,3,4
+group by 1,2,3
 """.format(period)
 
+# where b.quantity <= 2
 sales_join = sqlContext.sql(sales_join_query)
 sales_join.createOrReplaceTempView("sales_join")
 
@@ -312,15 +311,18 @@ ON a.item_no = b.item_no
 ethos_transaction_summary = sqlContext.sql(item_join_query)
 ethos_transaction_summary = ethos_transaction_summary.join(area_codes, ethos_transaction_summary.state == area_codes.state_code, how='left')
 
-ethos_transaction_summary = ethos_transaction_summary.drop('state_code')
+ethos_transaction_summary = ethos_transaction_summary.join(closing_stock_dates_filtered, on='closing_date', how='left')
+ethos_transaction_summary = ethos_transaction_summary.drop('state_code', 'mod') 
 
-ethos_transaction_summary.printSchema()
+# ethos_transaction_summary.printSchema()
 
 
 ethos_transaction_summary.groupBy().sum('quantity', 'sales_quantity', 'purchase_quantity', 'transfer_quantity').show()
 print (ethos_transaction_summary.filter('sales_quantity == 0').count())
 print (ethos_transaction_summary.filter('sales_quantity > 0').count())
 
+
+ethos_transaction_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'period_{0}_weeks.csv'.format(input_period), header='true')
 # ethos_transaction_summary.groupBy('item_no', 'location_code', 'closing_date', 'sales_quantity').agg(sf.count("closing_date")).filter('sales_quantity == 0 and closing_date is not null').orderBy('closing_date')
 
 # ethos_transaction_summary.groupBy('item_no', 'location_code', 'closing_date', 'sales_quantity').agg(sf.count("closing_date")).filter('sales_quantity > 0 and closing_date is not null').orderBy('closing_date')

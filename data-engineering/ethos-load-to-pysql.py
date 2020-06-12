@@ -203,10 +203,10 @@ CASE WHEN closing_date = to_date('2019/03/31', 'yyyy/MM/dd')
 ELSE CONCAT('W', lpad(weekofyear(date_sub(closing_date, 90)),2,0), '-FY', year(date_sub(closing_date, 90)) % 100, year(date_sub(closing_date, 90)) % 100 + 1) END week,
 first(brand) brand,
 first(department) department,
-sum(quantity) quantity,
-sum(cost_amount) cost_amount,
-sum(purchase_mrp) purchase_mrp,
-sum(stock_prevailing_mrp) stock_prevailing_mrp,
+avg(quantity) quantity,
+avg(cost_amount) cost_amount,
+avg(purchase_mrp) purchase_mrp,
+avg(stock_prevailing_mrp) stock_prevailing_mrp,
 first(to_date(purchase_date, 'yyyy/MM/dd')) purchase_date,
 first(state) state,
 first(region) region
@@ -223,28 +223,28 @@ sales_sql = '''select
      `Store No_` location_code,
      to_date(`Date`, 'yyyy/MM/dd') sales_date,
      cast(`Item No_` as int) item_no,
+     `Customer No_` customer_no,
      first(`Brand`) brand,
      first(`Department`) sales_department,
-     count(`Customer No_`) customer_no,
      sum(cast(Quantity as int)) quantity,
-     sum(float(`Price`)) price,
-     sum(float(`Total Price`)) total_price,
-     sum(float(`Line Discount Amount`)) line_discount,
-     sum(float(`CRM Line Disc_ Amount`)) crm_line_discount,
-     sum(float(`Discount Amount`)) discount,
-     sum(float(`Tax Amount`)) tax,
-     sum(float(`Cost Amount`)) cost,
-     sum(float(`Billing`)) billing,
-     sum(float(`Contribution`)) contribution,
+     avg(float(`Price`)) price,
+     avg(float(`Total Price`)) total_price,
+     avg(float(`Line Discount Amount`)) line_discount,
+     avg(float(`CRM Line Disc_ Amount`)) crm_line_discount,
+     avg(float(`Discount Amount`)) discount,
+     avg(float(`Tax Amount`)) tax,
+     avg(float(`Cost Amount`)) cost,
+     avg(float(`Billing`)) billing,
+     avg(float(`Contribution`)) contribution,
      first(to_date(`Receipt Date`, 'yyyy/MM/dd')) receipt_date,
-     sum(float(`Trade Incentive %`)) trade_incentive,
-     sum(float(`Trade Incentives Value`)) trade_incentive_value,
-     sum(float(`Total Contribution`)) total_contribution,
+     avg(float(`Trade Incentive %`)) trade_incentive,
+     avg(float(`Trade Incentives Value`)) trade_incentive_value,
+     avg(float(`Total Contribution`)) total_contribution,
      first(`State`) state,
      first(`Region`) region
 from sales_raw
 where `Date` is not null
-group by 1,2,3
+group by 1,2,3,4
 '''
 
 sales3.createOrReplaceTempView("sales3")
@@ -254,31 +254,29 @@ select
      `Store No_` location_code,
      to_date(`Date`, 'dd/MM/yyyy') sales_date,
      cast(`Item No_` as int) item_no,
+     `Customer No_` customer_no,
      first(`Brand`) brand,
      first(`Department`) sales_department,
-     count(`Customer No_`) customer_no,
      sum(cast(Quantity as int)) quantity,
-     sum(float(`Price`)) price,
-     sum(float(`Total Price`)) total_price,
-     sum(float(`Line Discount Amount`)) line_discount,
-     sum(float(`CRM Line Disc_ Amount`)) crm_line_discount,
-     sum(float(`Discount Amount`)) discount,
-     sum(float(`Tax Amount`)) tax,
-     sum(float(`Cost Amount`)) cost,
-     sum(float(`Billing`)) billing,
-     sum(float(`Contribution`)) contribution,
+     avg(float(`Price`)) price,
+     avg(float(`Total Price`)) total_price,
+     avg(float(`Line Discount Amount`)) line_discount,
+     avg(float(`CRM Line Disc_ Amount`)) crm_line_discount,
+     avg(float(`Discount Amount`)) discount,
+     avg(float(`Tax Amount`)) tax,
+     avg(float(`Cost Amount`)) cost,
+     avg(float(`Billing`)) billing,
+     avg(float(`Contribution`)) contribution,
      first(to_date(`Receipt Date`, 'dd/MM/yy')) receipt_date,
-     sum(float(`Trade Incentive %`)) trade_incentive,
-     sum(float(`Trade Incentives Value`)) trade_incentive_value,
-     sum(float(`Total Contribution`)) total_contribution,
+     avg(float(`Trade Incentive %`)) trade_incentive,
+     avg(float(`Trade Incentives Value`)) trade_incentive_value,
+     avg(float(`Total Contribution`)) total_contribution,
      first(`State`) state,
      first(`Region`) region
 from sales3
 where `Date` is not null
-group by 1,2,3
+group by 1,2,3,4
 """
-
-# CONCAT('W', weekofyear(to_date(`Date`, 'yyyy/MM/dd')), '-FY', year(to_date(`Date`, 'yyyy/MM/dd')) % 100, year(to_date(`Date`, 'yyyy/MM/dd')) % 100 + 1) week
 
 sales_table = sqlContext.sql(sales_sql)
 sales_table.createOrReplaceTempView("sales")
@@ -296,21 +294,36 @@ purchase_sql = """select
  `Location Code` location_code,
  to_date(`Posting Date`, 'yyyy/MM/dd')  posting_date,
  `Item No_` item_no,
- `Brand` brand,
- `Department` department,
- `Quantity` quantity,
- `Purchase MRP` purchase_mrp,
- `Cost Amount` cost_amount,
- `State Code` state_code,
- `Region` region
+ first(`Brand`) brand,
+ first(`Department`) department,
+ sum(`Quantity`) quantity,
+ avg(`Purchase MRP`) purchase_mrp,
+ avg(`Cost Amount`) cost_amount,
+ first(`State Code`) state_code,
+ first(`Region`) region
 from purchase_raw
 where `Posting Date` is not null
+group by 1,2,3
 """
 
 purchase_table = sqlContext.sql(purchase_sql)
 purchase_table.createOrReplaceTempView("purchase")
 
-transfer_sql = """select `Store Out` store_out, to_date(`Store Out Date`, 'yyyy/MM/dd') store_out_date, `Store In` store_in, to_date(`Store In Date`, 'yyyy/MM/dd') store_in_date, `Item No_` item_no, `Brand` brand, `Product Group Code` product_group_code, `Quantity` quantity, `Cost Amount` cost_amount, float(MRP) mrp, to_date(`Purchase Date`, 'yyyy/MM/dd') purchase_date, `State` state, `Region` region from transfer_raw where `Store In Date` is not null"""
+transfer_sql = """select 
+    `Store Out` store_out, 
+    to_date(`Store Out Date`, 'yyyy/MM/dd') store_out_date, 
+    `Store In` store_in, 
+    to_date(`Store In Date`, 'yyyy/MM/dd') store_in_date, 
+    `Item No_` item_no, 
+    `Brand` brand, 
+    `Product Group Code` product_group_code, 
+    `Quantity` quantity, 
+    `Cost Amount` cost_amount, 
+    float(MRP) mrp, 
+    to_date(`Purchase Date`, 'yyyy/MM/dd') purchase_date, 
+    `State` state, 
+    `Region` region 
+from transfer_raw where `Store In Date` is not null"""
 
 transfer_table = sqlContext.sql(transfer_sql)
 transfer_table.createOrReplaceTempView("transfer")
@@ -426,7 +439,7 @@ transfer_in_join_query = """select
     ON a.location_code = b.store_in
     AND a.item_no = b.item_no
    AND b.week = a.week
-   """
+ """
    
 transfer_in_join = sqlContext.sql(transfer_in_join_query)
 transfer_in_join.createOrReplaceTempView("transfer_in_join") 
@@ -466,6 +479,7 @@ sales_weekly_query = """select
  first(state) state,
  first(region) region
 from sales b
+where quantity < 2 and quantity > 0
 group by 1,2,3
 """
 sales_weekly = sqlContext.sql(sales_weekly_query)
@@ -518,7 +532,7 @@ sales_join.createOrReplaceTempView("sales_join")
 # week_sales_date_mapping
 store_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(data_path + "store_master_with_state_and_regions.csv")
 # store_master = store_master.drop('state', 'region')
-store_master = store_master.drop('_c7', '_c8', '_c9')
+store_master = store_master.drop('_c7', '_c8', '_c9', 'Status')
 
 # store_regions = sales_join.filter("region is not null and state is not null").select('location_code', 'region', 'state').distinct()
 # store_master = store_master.join(store_regions, store_master.store_code == store_regions.location_code, how = 'left_outer').drop('location_code')
@@ -537,31 +551,38 @@ item_join_query = """select a.*,
     b.case_size case_size,
     b.case_size_range,
     b.gender,
-    b.movement,
-    b.material,
-    b.dial_color,
-    b.strap_type,
-    b.strap_color,
-    b.precious_stone,
-    b.glass,
-    b.case_shape,
-    b.watch_type
+    lower(b.movement) movement,
+    lower(b.material) material,
+    lower(b.dial_color) dial_color,
+    lower(b.strap_type) strap_type,
+    lower(b.strap_color) strap_color,
+    lower(b.precious_stone) precious_stone,
+    lower(b.glass) glass,
+    lower(b.case_shape) case_shape,
+    lower(b.watch_type) watch_type
 from store_join a LEFT JOIN item_master b
 ON a.item_no = b.item_no
+order by week_no, year
 """
 
-ethos_transaction_summary = sqlContext.sql(item_join_query)
-ethos_transaction_summary = ethos_transaction_summary.filter('week is not null')
+ethos_transaction_summary = sqlContext.sql(item_join_query).filter('week is not null and brand is not null')
 
 ethos_transaction_summary = ethos_transaction_summary.join(area_codes, ethos_transaction_summary.state == area_codes.state_code, how='left')
 
 ethos_transaction_summary = ethos_transaction_summary.drop('state_code').drop('department')
-# transfer_in_join.select('week', 'closing_date').distinct().show(100)
-#ethos_transaction_summary.select('week', 'closing_date').distinct().show(100)
 
-print('Done\n\n Done.')
+print('Done.')
+
+ethos_transaction_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'summary_all2',header = 'true')
+# transfer_in_join.select('week', 'closing_date').distinct().show(100)
+#ethos_transaction_summary..filter('brand is not null')
+
+print('Done Export.')
 
 """
+ethos_transaction_summary.filter('Status != "To be removed"').filter('brand is not null').repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'summary_all', header='true')
+ethos_transaction_summary.filter('Status != "To be removed"').filter('brand is not null').filter('area_code == 2')
+
 ethos_transaction_summary_sorted = ethos_transaction_summary.orderBy('week_no', 'year')
 ethos_transaction_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'summary_area_code.csv',header = 'true')
 

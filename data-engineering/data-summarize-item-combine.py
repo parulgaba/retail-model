@@ -276,3 +276,40 @@ for filename in os.listdir(stock_data_dir):
         #    break
 
 print("Total Files Processed : ", str(file_cnt))
+
+
+
+'''
+
+
+item_join_query = """select a.*,
+    split(a.closing_week, '-')[0] week,
+    split(a.closing_week, '-')[1] year,
+    float(split(b.case_size, ' ')[0]) case_size,
+    b.case_size_range,
+    b.gender,
+    b.movement,
+    b.material,
+    b.dial_color,
+    b.strap_type,
+    b.strap_color,
+    b.precious_stone,
+    b.glass,
+    b.case_shape,
+    b.watch_type
+from store_join a LEFT JOIN item_master b
+ON a.item_no = b.item_no
+"""
+
+
+ CASE WHEN closing_date = to_date('2019/03/31', 'yyyy/MM/dd')
+ THEN 1
+ ELSE month(date_sub(closing_date, 90)) END month,
+ 
+ CASE WHEN closing_date = to_date('2019/03/31', 'yyyy/MM/dd')
+ THEN 1
+ ELSE weekofyear(date_sub(closing_date, 90)) END week,
+ 
+ CASE WHEN closing_date = to_date('2019/03/31', 'yyyy/MM/dd')
+ THEN 19
+ ELSE year(date_sub(closing_date, 90)) % 100 END year
