@@ -192,6 +192,7 @@ purchase_join_query = """SELECT
     CASE WHEN a.location_code is not null THEN a.location_code ELSE b.location_code END location_code,
     CASE WHEN a.item_no is not null THEN a.item_no ELSE b.item_no END item_no,
     a.closing_date closing_date,
+    a.period_number period_number,
     first(a.purchase_date) purchase_date,
     first(b.posting_date) posting_date,
     CASE when avg(a.stock_prevailing_mrp) is not null THEN avg(a.stock_prevailing_mrp) ELSE avg(b.purchase_mrp) END stock_prevailing_mrp,
@@ -205,7 +206,7 @@ from closing_stock a FULL OUTER JOIN purchase b
     AND a.item_no = b.item_no
     AND b.posting_date > a.closing_date
     AND b.posting_date <= date_add(a.closing_date, {0})
-    group by 1,2,3
+    group by 1,2,3,4
 """.format(period)
 
 
@@ -216,6 +217,7 @@ transfer_join_query = """SELECT
     CASE WHEN a.location_code is not null THEN a.location_code ELSE b.store_in END location_code,
     CASE WHEN a.item_no is not null THEN a.item_no ELSE b.item_no END item_no,
     a.closing_date closing_date,
+    a.period_number period_number,
     first(a.purchase_date) purchase_date,
     first(a.posting_date) posting_date,
     first(b.store_in_date) store_in_date,
@@ -233,7 +235,7 @@ from purchase_join a FULL OUTER JOIN transfer b
     AND a.item_no = b.item_no
     AND b.store_in_date > a.closing_date
     AND b.store_in_date <= date_add(a.closing_date, {0})
-    group by 1,2,3
+    group by 1,2,3,4
 """.format(period)
 
 transfer_in_join = sqlContext.sql(transfer_join_query)
@@ -243,6 +245,7 @@ sales_join_query = """SELECT
     CASE WHEN a.location_code is not null THEN a.location_code ELSE b.location_code END location_code,
     CASE WHEN a.item_no is not null THEN a.item_no ELSE b.item_no END item_no,
     a.closing_date closing_date,
+    a.period_number period_number,
     first(a.purchase_date) purchase_date,
     first(a.posting_date) posting_date,
     first(a.store_in_date) store_in_date,
@@ -274,7 +277,7 @@ from transfer_in_join a FULL OUTER JOIN sales b
  AND b.sales_date > a.closing_date
  AND b.sales_date <= date_add(a.closing_date, {0})
  where b.quantity <= 2
-group by 1,2,3
+group by 1,2,3,4
 """.format(period)
 
 sales_join = sqlContext.sql(sales_join_query)
@@ -315,8 +318,8 @@ ethos_transaction_summary.printSchema()
 
 
 ethos_transaction_summary.groupBy().sum('quantity', 'sales_quantity', 'purchase_quantity', 'transfer_quantity').show()
-ethos_transaction_summary.filter('sales_quantity == 0').count()
-ethos_transaction_summary.filter('sales_quantity > 0').count()
+print (ethos_transaction_summary.filter('sales_quantity == 0').count())
+print (ethos_transaction_summary.filter('sales_quantity > 0').count())
 
 # ethos_transaction_summary.groupBy('item_no', 'location_code', 'closing_date', 'sales_quantity').agg(sf.count("closing_date")).filter('sales_quantity == 0 and closing_date is not null').orderBy('closing_date')
 
