@@ -6,6 +6,8 @@ Created on Thu Jun 11 14:15:35 2020
 @author: parulgaba
 """
 from pyspark.sql.functions import desc, asc,expr
+import pyspark.sql.functions as sf
+from pyspark.sql import Window
 
 dirpath = '/Users/parulgaba/Desktop/Capstone-Ethos/ConfidentialData/csvdata/'
 
@@ -63,22 +65,24 @@ where closing_date is not null
 group by item_no,location_code,closing_date"""
 
 closing_stock_table = sqlContext.sql(closing_sql)
-closing_stock_table.createOrReplaceTempView("closing_stock")
 
 closing_stock_dates = closing_stock_table.select('closing_date').distinct().orderBy(asc('closing_date'))
 
 
-from pyspark.sql.window import Window
-  # row_numberval 
+  # row_number val 
 windowSpec = Window.orderBy("closing_date")
-closing_stock_dates = closing_stock_dates.withColumn("row_number",sf.row_number().over(windowSpec))
+closing_stock_dates = closing_stock_dates.withColumn("period_number",sf.row_number().over(windowSpec))
 
-input_period = 4
+input_period = 6
+period = 7 * input_period
 
-closing_stock_dates_filtered = closing_stock_dates.withColumn("mod", expr('row_number % 4')).filter("mod == 1").select('closing_date')
+closing_stock_dates_filtered = closing_stock_dates.withColumn("mod", expr('period_number % {0}'.format(input_period))).filter("mod == 1")
+# .select('closing_date')
 # closing_stock_dates_array = [int(row.closing_date) for row in closing_stock_dates.collect()]
 
-closing_stock_table_filtered = closing_stock_table.join(closing_stock_dates_filtered, on='closing_date', how='left')
+closing_stock_table_filtered = closing_stock_dates_filtered.join(closing_stock_table, on='closing_date', how='left')
+
+closing_stock_table_filtered.createOrReplaceTempView("closing_stock")
 
 sales_sql = '''select
      `Store No_` location_code,
@@ -147,19 +151,19 @@ sales_table.createOrReplaceTempView("sales")
 
 
 purchase_sql = """select
- `Location Code` location_code,
- to_date(`Posting Date`, 'yyyy/MM/dd')  posting_date,
- `Item No_` item_no,
- first(`Brand`) brand,
- first(`Department`) department,
- sum(`Quantity`) quantity,
- avg(`Purchase MRP`) purchase_mrp,
- avg(`Cost Amount`) cost_amount,
- first(`State Code`) state_code,
- first(`Region`) region
+    `Location Code` location_code,
+    to_date(`Posting Date`, 'yyyy/MM/dd')  posting_date,
+    `Item No_` item_no,
+    first(`Brand`) brand,
+    first(`Department`) department,
+    sum(`Quantity`) quantity,
+    avg(`Purchase MRP`) purchase_mrp,
+    avg(`Cost Amount`) cost_amount,
+    first(`State Code`) state_code,
+    first(`Region`) region
 from purchase_raw
-where `Posting Date` is not null
-group by 1,2,3
+    where `Posting Date` is not null
+    group by 1,2,3
 """
 
 purchase_table = sqlContext.sql(purchase_sql)
@@ -177,59 +181,60 @@ transfer_sql = """select
     `Cost Amount` cost_amount, 
     float(MRP) mrp, 
     to_date(`Purchase Date`, 'yyyy/MM/dd') purchase_date
-from transfer_raw where `Store In Date` is not null"""
+from transfer_raw 
+    where `Store In Date` is not null"""
 
 transfer_table = sqlContext.sql(transfer_sql)
 transfer_table.createOrReplaceTempView("transfer")
 
 
 purchase_join_query = """SELECT
-     CASE WHEN a.location_code is not null THEN a.location_code ELSE b.location_code END location_code,
-     CASE WHEN a.item_no is not null THEN a.item_no ELSE b.item_no END item_no,
-     a.closing_date closing_date,
-     first(a.purchase_date) purchase_date,
-     first(b.posting_date) posting_date,
-     CASE when avg(a.stock_prevailing_mrp) is not null THEN avg(a.stock_prevailing_mrp) ELSE avg(b.purchase_mrp) END stock_prevailing_mrp,
-     CASE WHEN first(a.brand) is not null THEN first(a.brand) ELSE first(b.brand) END brand,
-     sum(a.quantity) quantity,
-     sum(b.quantity) purchase_quantity,
-     avg(a.cost_amount) cost_amount,
-     avg(a.purchase_mrp) purchase_mrp
- from closing_stock a FULL OUTER JOIN purchase b
- ON a.location_code = b.location_code 
- AND a.item_no = b.item_no
- AND b.posting_date > a.closing_date
- AND b.posting_date <= date_add(a.closing_date, 7*4)
-group by 1,2,3
-"""
+    CASE WHEN a.location_code is not null THEN a.location_code ELSE b.location_code END location_code,
+    CASE WHEN a.item_no is not null THEN a.item_no ELSE b.item_no END item_no,
+    a.closing_date closing_date,
+    first(a.purchase_date) purchase_date,
+    first(b.posting_date) posting_date,
+    CASE when avg(a.stock_prevailing_mrp) is not null THEN avg(a.stock_prevailing_mrp) ELSE avg(b.purchase_mrp) END stock_prevailing_mrp,
+    CASE WHEN first(a.brand) is not null THEN first(a.brand) ELSE first(b.brand) END brand,
+    avg(a.quantity) quantity,
+    sum(b.quantity) purchase_quantity,
+    avg(a.cost_amount) cost_amount,
+    avg(a.purchase_mrp) purchase_mrp
+from closing_stock a FULL OUTER JOIN purchase b
+    ON a.location_code = b.location_code 
+    AND a.item_no = b.item_no
+    AND b.posting_date > a.closing_date
+    AND b.posting_date <= date_add(a.closing_date, {0})
+    group by 1,2,3
+""".format(period)
 
 
 purchase_join = sqlContext.sql(purchase_join_query)
 purchase_join.createOrReplaceTempView("purchase_join") 
 
 transfer_join_query = """SELECT 
-  CASE WHEN a.location_code is not null THEN a.location_code ELSE b.store_in END location_code,
-     CASE WHEN a.item_no is not null THEN a.item_no ELSE b.item_no END item_no,
-     a.closing_date closing_date,
-     first(a.purchase_date) purchase_date,
-     first(a.posting_date) posting_date,
-     first(b.store_in_date) store_in_date,
-     CASE when avg(a.stock_prevailing_mrp) is not null THEN avg(a.stock_prevailing_mrp) ELSE avg(b.mrp) END stock_prevailing_mrp,
-     CASE WHEN first(a.brand) is not null THEN first(a.brand) ELSE first(b.brand) END brand,
-     sum(a.quantity) quantity,
-     sum(a.purchase_quantity) purchase_quantity,
-     sum(b.quantity) transfer_quantity,
-     avg(a.cost_amount) cost_amount,
-     avg(a.purchase_mrp) purchase_mrp,
-     first(b.product_group_code) product_group_code,
-     avg(b.cost_amount) transfer_cost_amount
-  from purchase_join a FULL OUTER JOIN transfer b
- ON a.location_code = b.store_in 
- AND a.item_no = b.item_no
- AND b.store_in_date > a.closing_date
- AND b.store_in_date <= date_add(a.closing_date, 7*4)
-group by 1,2,3
-"""
+    CASE WHEN a.location_code is not null THEN a.location_code ELSE b.store_in END location_code,
+    CASE WHEN a.item_no is not null THEN a.item_no ELSE b.item_no END item_no,
+    a.closing_date closing_date,
+    first(a.purchase_date) purchase_date,
+    first(a.posting_date) posting_date,
+    first(b.store_in_date) store_in_date,
+    CASE when avg(a.stock_prevailing_mrp) is not null THEN avg(a.stock_prevailing_mrp) ELSE avg(b.mrp) END stock_prevailing_mrp,
+    CASE WHEN first(a.brand) is not null THEN first(a.brand) ELSE first(b.brand) END brand,
+    avg(a.quantity) quantity,
+    avg(a.purchase_quantity) purchase_quantity,
+    sum(b.quantity) transfer_quantity,
+    avg(a.cost_amount) cost_amount,
+    avg(a.purchase_mrp) purchase_mrp,
+    first(b.product_group_code) product_group_code,
+    avg(b.cost_amount) transfer_cost_amount
+from purchase_join a FULL OUTER JOIN transfer b
+    ON a.location_code = b.store_in 
+    AND a.item_no = b.item_no
+    AND b.store_in_date > a.closing_date
+    AND b.store_in_date <= date_add(a.closing_date, {0})
+    group by 1,2,3
+""".format(period)
 
 transfer_in_join = sqlContext.sql(transfer_join_query)
 transfer_in_join.createOrReplaceTempView("transfer_in_join")
@@ -238,18 +243,18 @@ sales_join_query = """SELECT
     CASE WHEN a.location_code is not null THEN a.location_code ELSE b.location_code END location_code,
     CASE WHEN a.item_no is not null THEN a.item_no ELSE b.item_no END item_no,
     a.closing_date closing_date,
-     first(a.purchase_date) purchase_date,
-     first(a.posting_date) posting_date,
-     first(a.store_in_date) store_in_date,
-     CASE when avg(a.stock_prevailing_mrp) is not null THEN avg(a.stock_prevailing_mrp) ELSE avg(b.price) END stock_prevailing_mrp,
-     CASE WHEN first(a.brand) is not null THEN first(a.brand) ELSE first(b.brand) END brand,
-    sum(a.quantity) quantity,
-     sum(a.purchase_quantity) purchase_quantity,
-     sum(a.transfer_quantity) transfer_quantity,
-     avg(a.cost_amount) cost_amount,
-     avg(a.purchase_mrp) purchase_mrp,
-     first(a.product_group_code) product_group_code,
-     avg(a.transfer_cost_amount) transfer_cost_amount,
+    first(a.purchase_date) purchase_date,
+    first(a.posting_date) posting_date,
+    first(a.store_in_date) store_in_date,
+    CASE when avg(a.stock_prevailing_mrp) is not null THEN avg(a.stock_prevailing_mrp) ELSE avg(b.price) END stock_prevailing_mrp,
+    CASE WHEN first(a.brand) is not null THEN first(a.brand) ELSE first(b.brand) END brand,
+    avg(a.quantity) quantity,
+    avg(a.purchase_quantity) purchase_quantity,
+    avg(a.transfer_quantity) transfer_quantity,
+    avg(a.cost_amount) cost_amount,
+    avg(a.purchase_mrp) purchase_mrp,
+    first(a.product_group_code) product_group_code,
+    avg(a.transfer_cost_amount) transfer_cost_amount,
     sum(b.quantity) sales_quantity,
     DATEDIFF(first(a.closing_date), first(a.purchase_date)) days_to_sell,
     avg(b.total_price) total_price,
@@ -267,14 +272,15 @@ from transfer_in_join a FULL OUTER JOIN sales b
  ON a.location_code = b.location_code 
  AND a.item_no = b.item_no
  AND b.sales_date > a.closing_date
- AND b.sales_date <= date_add(a.closing_date, 7*4)
+ AND b.sales_date <= date_add(a.closing_date, {0})
  where b.quantity <= 2
 group by 1,2,3
-""" 
-
+""".format(period)
 
 sales_join = sqlContext.sql(sales_join_query)
 sales_join.createOrReplaceTempView("sales_join")
+
+store_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(data_path + "store_master_with_state_and_regions.csv")
 
 store_master = store_master.drop('_c7', '_c8', '_c9', 'Status')
 store_join = sales_join.join(store_master, store_master.store_code == sales_join.location_code, how='left').drop('store_code')
@@ -308,6 +314,15 @@ ethos_transaction_summary = ethos_transaction_summary.drop('state_code')
 ethos_transaction_summary.printSchema()
 
 
+ethos_transaction_summary.groupBy().sum('quantity', 'sales_quantity', 'purchase_quantity', 'transfer_quantity').show()
+ethos_transaction_summary.filter('sales_quantity == 0').count()
+ethos_transaction_summary.filter('sales_quantity > 0').count()
+
+# ethos_transaction_summary.groupBy('item_no', 'location_code', 'closing_date', 'sales_quantity').agg(sf.count("closing_date")).filter('sales_quantity == 0 and closing_date is not null').orderBy('closing_date')
+
+# ethos_transaction_summary.groupBy('item_no', 'location_code', 'closing_date', 'sales_quantity').agg(sf.count("closing_date")).filter('sales_quantity > 0 and closing_date is not null').orderBy('closing_date')
+
+# filepath = '/Users/parulgaba/Desktop/Capstone-Ethos/ethos-retail-model/data-engineering/periodic_summary.py'
 
 
 
