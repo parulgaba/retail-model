@@ -12,7 +12,7 @@ from pyspark import SparkContext
 from pyspark.streaming import StreamingContext
 from pyspark.sql import SQLContext
 
-from pyspark.sql.functions import desc
+from pyspark.sql.functions import desc, asc
 
 sc = SparkContext(appName="PythonStreamingQueueStream") 
 sqlContext = SQLContext(sc)
@@ -203,7 +203,7 @@ CASE WHEN closing_date = to_date('2019/03/31', 'yyyy/MM/dd')
 ELSE CONCAT('W', lpad(weekofyear(date_sub(closing_date, 90)),2,0), '-FY', year(date_sub(closing_date, 90)) % 100, year(date_sub(closing_date, 90)) % 100 + 1) END week,
 first(brand) brand,
 first(department) department,
-avg(quantity) quantity,
+sum(quantity) quantity,
 avg(cost_amount) cost_amount,
 avg(purchase_mrp) purchase_mrp,
 avg(stock_prevailing_mrp) stock_prevailing_mrp,
@@ -351,8 +351,8 @@ purchase_weekly_query = """SELECT
  first(brand) brand,
  first(department) department,
  sum(quantity) quantity,
- sum(purchase_mrp) purchase_mrp,
- sum(cost_amount) cost_amount,
+ avg(purchase_mrp) purchase_mrp,
+ avg(cost_amount) cost_amount,
  first(state_code) state,
  first(region) region
 from purchase
@@ -405,8 +405,8 @@ transfer_weekly_query = """SELECT
 first(brand) brand,
 first(product_group_code) product_group_code,
 sum(quantity) quantity,
-sum(cost_amount) cost_amount,
-sum(mrp) mrp,
+avg(cost_amount) cost_amount,
+avg(mrp) mrp,
 first(purchase_date) purchase_date,
  first(state) state,
  first(region) region
@@ -464,18 +464,18 @@ sales_weekly_query = """select
  first(b.sales_department) sales_department,
  count(b.customer_no) num_of_customers,
  sum(b.quantity) quantity,
- sum(b.price) price,
- sum(b.total_price) total_price,
- sum(b.line_discount) line_discount,
- sum(b.crm_line_discount) crm_line_discount,
- sum(b.discount) discount,
- sum(b.tax) tax,
- sum(b.cost) cost,
- sum(b.billing) billing,
- sum(b.contribution) contribution,
- sum(b.trade_incentive) trade_incentive,
- sum(b.trade_incentive_value) trade_incentive_value,
- sum(b.total_contribution) total_contribution,
+ avg(b.price) price,
+ avg(b.total_price) total_price,
+ avg(b.line_discount) line_discount,
+ avg(b.crm_line_discount) crm_line_discount,
+ avg(b.discount) discount,
+ avg(b.tax) tax,
+ avg(b.cost) cost,
+ avg(b.billing) billing,
+ avg(b.contribution) contribution,
+ avg(b.trade_incentive) trade_incentive,
+ avg(b.trade_incentive_value) trade_incentive_value,
+ avg(b.total_contribution) total_contribution,
  first(state) state,
  first(region) region
 from sales b
@@ -545,9 +545,9 @@ store_join = store_join.na.fill(0)
 store_join.createOrReplaceTempView("store_join")
 
 item_join_query = """select a.*,
-    (a.quantity + a.purchase_quantity + a.transfer_quantity) available_quantity,
     substr(a.week, 0, 3) week_no,
     substr(a.week, 5) year,
+    (a.quantity + a.purchase_quantity + a.transfer_quantity) available_quantity,
     b.case_size case_size,
     b.case_size_range,
     b.gender,
@@ -562,20 +562,19 @@ item_join_query = """select a.*,
     lower(b.watch_type) watch_type
 from store_join a LEFT JOIN item_master b
 ON a.item_no = b.item_no
-order by week_no, year
 """
 
-ethos_transaction_summary = sqlContext.sql(item_join_query).filter('week is not null and brand is not null')
+ethos_transaction_summary = sqlContext.sql(item_join_query) #.filter('week is not null and brand is not null')
 
 ethos_transaction_summary = ethos_transaction_summary.join(area_codes, ethos_transaction_summary.state == area_codes.state_code, how='left')
 
-ethos_transaction_summary = ethos_transaction_summary.drop('state_code').drop('department')
+ethos_transaction_summary = ethos_transaction_summary.drop('state_code').drop('department').filter('brand is not null and week is not null')
 
 print('Done.')
 
-ethos_transaction_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'summary_all2',header = 'true')
+ethos_transaction_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'summary_all_3',header = 'true')
 # transfer_in_join.select('week', 'closing_date').distinct().show(100)
-#ethos_transaction_summary..filter('brand is not null')
+#ethos_transaction_summary.filter('brand is not null')
 
 print('Done Export.')
 
@@ -698,7 +697,9 @@ ethos_transaction_summary.select('gender').distinct().show()
 
 Pull missing items in sales
 
-sales_table.filter("sales_date > date'2017-04-02'and sales_date <= date'2017-04-09'").join(ethos_transaction_summary.filter("closing_date == date'2017-04-02'").select('item_no', 'location_code', 'closing_date'), on=['item_no', 'location_code'], how = 'left_anti').select(sales_table["*"])
+sales_table.filter("sales_date > date'2017-04-02'and sales_date <= date'2017-04-09'").join(ethos_transaction_summary
+.filter("closing_date == date'2017-04-02'").select('item_no', 'location_code', 'closing_date')
+, on=['item_no', 'location_code'], how = 'left_anti').select(sales_table["*"])
 
 
 

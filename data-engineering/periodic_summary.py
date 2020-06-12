@@ -73,7 +73,7 @@ closing_stock_dates = closing_stock_table.select('closing_date').distinct().orde
 windowSpec = Window.orderBy("closing_date")
 closing_stock_dates = closing_stock_dates.withColumn("period_number",sf.row_number().over(windowSpec))
 
-input_period = 4
+input_period = 6
 period = 7 * input_period
 
 closing_stock_dates_filtered = closing_stock_dates.withColumn("mod", expr('period_number % {0}'.format(input_period))).filter("mod == 1")
@@ -315,7 +315,6 @@ ethos_transaction_summary = ethos_transaction_summary.join(closing_stock_dates_f
 ethos_transaction_summary = ethos_transaction_summary.drop('state_code', 'mod') 
 
 # ethos_transaction_summary.printSchema()
-
 
 ethos_transaction_summary.groupBy().sum('quantity', 'sales_quantity', 'purchase_quantity', 'transfer_quantity').show()
 print (ethos_transaction_summary.filter('sales_quantity == 0').count())
