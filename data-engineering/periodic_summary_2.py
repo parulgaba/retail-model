@@ -18,7 +18,7 @@ ethos_transaction_summary = sqlContext.read.format("com.databricks.spark.csv").o
 stores_to_be_removed = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(data_path +  "stores_to_be_removed.csv")
 
 ethos_transaction_summary = ethos_transaction_summary.join(stores_to_be_removed, on='location_code', how='left_anti')
-input_period = 10
+input_period = 12
 
 print('\n\n Summary for aggregation of {0} weeks'.format(str(input_period)))
 
@@ -90,15 +90,17 @@ group by period, item_no, location_code
 
 aggregated_summary = sqlContext.sql(aggregated_summary_query)
 
-print(aggregated_summary.filter('sales_quantity > 0').count())
+aggregated_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'aggregated_summary_period_{0}_weeks.csv'.format(input_period), header='true')
 
-print (aggregated_summary.count())
+# print(aggregated_summary.filter('sales_quantity > 0').count())
+
+# print (aggregated_summary.count())
 
 
 print('\n\n STORETYPE AGG, Summary for aggregation of {0} weeks'.format(str(input_period)))
 
 aggregated_summary_query_store_type = """select
- location_code,
+ period,
  item_no,
  store_location,
  store_type,
@@ -146,11 +148,11 @@ aggregated_summary_query_store_type = """select
   first(watch_type) watch_type,
  first(area_code) area_code
 from ethos_transaction_summary
-group by item_no, location_code, store_type, store_location
+group by item_no, period, store_type, store_location
 """
 
 aggregated_summary_store_type = sqlContext.sql(aggregated_summary_query_store_type)
 
-print(aggregated_summary_store_type.filter('sales_quantity > 0').count())
-
-print (aggregated_summary_store_type.count())
+aggregated_summary_store_type.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'aggregated_summary_store_type_{0}_weeks.csv'.format(input_period), header='true')
+#print(aggregated_summary_store_type.filter('sales_quantity > 0').count())
+#print (aggregated_summary_store_type.count())
