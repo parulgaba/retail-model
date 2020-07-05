@@ -110,7 +110,7 @@ sales_sql = '''select
      first(`State`) state,
      first(`Region`) region
 from sales_raw
-where `Date` is not null
+where `Date` is not null and cast(Quantity as int) >= 0
 group by 1,2,3,4
 '''
 
@@ -141,7 +141,7 @@ select
      first(`State`) state,
      first(`Region`) region
 from sales3
-where `Date` is not null
+where `Date` is not null and cast(Quantity as int) >= 0
 group by 1,2,3,4
 """
 
@@ -326,7 +326,7 @@ ethos_transaction_summary.repartition(1).write.format('com.databricks.spark.csv'
 
 # ethos_transaction_summary.groupBy('item_no', 'location_code', 'closing_date', 'sales_quantity').agg(sf.count("closing_date")).filter('sales_quantity > 0 and closing_date is not null').orderBy('closing_date')
 
-# filepath = '/Users/parulgaba/Desktop/Capstone-Ethos/ethos-retail-model/data-engineering/periodic_summary.py'
+# filepath = '/Users/parulgaba/Desktop/Capstone-Ethos/ethos-retail-model/data-engineering/periodic_summary_2.py'
 
 
 

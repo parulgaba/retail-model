@@ -17,140 +17,9 @@ from pyspark.sql.functions import desc, asc
 sc = SparkContext(appName="PythonStreamingQueueStream") 
 sqlContext = SQLContext(sc)
 '''
-"""
-import csv
-import os
-import pandas as pd
-from os.path import basename
-import pymysql
-import glob
-from datetime import datetime
 
 
-connection_details = {
-    'name': 'local',
-    'conn': '127.0.0.1',
-    'user': 'user',
-    'password': 'welcome',
-    'sqlDb': 'ethos-sales'
-}
-
-try:
-    myDb = pymysql.connect(host=connection_details['conn'], user=connection_details['user'], password=connection_details['password'])
-except Exception as e:
-    raise e
-    
-
-cur = myDb.cursor()
-
-dirpath = '/Users/parulgaba/Desktop/Capstone-Ethos/ConfidentialData/csvdata/'
-
-data_path = '/Users/parulgaba/Desktop/Capstone-Ethos/ethos-retail-model/data/'
-
-path = dirpath + '*.csv'
-
-'''
-for f in os.listdir(dirpath):
-    os.rename(os.path.join(dirpath, f), os.path.join(dirpath, f).replace(' ', '_'))
-    
-transfer_data_cols = "`,`".join([str(i) for i in transfer_data.columns])
-
-
-for i,row in transfer_data.iterrows():
-    sql = "INSERT INTO `transfer` (`" +transfer_data_cols + "`) VALUES (" + "%s,"*(len(row)-1) + "%s)"
-    cur.execute(sql, tuple(row))
-
-    # the connection is not autocommitted by default, so we must commit to save our changes
-    myDb.commit()
-    
-    That means we first do the closing stock join with purchase and transfer
-
-That will be our available table - Then we join sales data on it.
-Condition being item_no, location_code, [sales_date in closing_week or ______CONDITION WHICH MATCHES OTHER ITEMS___]
-'''    
-
-# Load annual data
-sales3 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Sale Data 01.04.19 to 31.03.20.csv")
-sales2 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Sale Data 01.04.17 to 31.03.18.csv")
-sales1 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Sale Data 01.04.18 to 31.03.19.csv")
-sales_data = sales1.unionAll(sales2)
-
-
-purchase1 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Purchase_Data_01.04.17_to_31.03.18.csv")
-purchase2 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Purchase_Data_01.04.18_to_31.03.19.csv")
-purchase3 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Purchase_Data_01.04.19_to_06.02.2020.csv")
-purchase_data = purchase1.unionAll(purchase2).unionAll(purchase3)
-
-transfer1 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Transfer_Data_01.04.17_to_31.03.18.csv")
-transfer2 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Transfer_Data_01.04.18_to_31.03.19.csv")
-transfer3 = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Transfer_Data_01.04.19_to_06.02.2020.csv")
-transfer_data = transfer1.unionAll(transfer2).unionAll(transfer3)
-
-
-sales_data.createOrReplaceTempView("sales_raw")
-purchase_data.createOrReplaceTempView("purchase_raw")
-transfer_data.createOrReplaceTempView("transfer_raw")
-   
-# Load master data
-item_master = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "combined_item_master_deduped.csv")
-item_master = item_master.drop('s_no')
-item_master_old = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(dirpath + "Item_Master.csv")
-item_master = item_master.unionAll(item_master_old)
-item_master = item_master.dropDuplicates(subset = ['item_no'])
-
-item_master.createOrReplaceTempView("item_master") 
-# load weekly closing data
-weekly_closing_dir_path = '/Users/parulgaba/Desktop/Capstone-Ethos/Encoded/weekly-closing-stock/'
-weekly_closing_file_path = weekly_closing_dir_path + '*.csv'
-
-weekly_closing_output_path = data_path + 'closing_stock_data.csv'
-
-ethos_transaction_summary = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(data_path + 'ethos_transaction_summary.csv')
-
-# Before reading closing stock, add closing date column to the files using file name.
-# Ideally date must be put along with other cloumns while generatin closing stock data
-for f in glob.glob(weekly_closing_file_path):
-    print(f)
-    temp_date = os.path.splitext(os.path.basename(f))[0].split('_')[1]
-    
-    for dateformat in ('%d.%m.%y', '%d.%m.%Y'):
-        try:
-            closing_date = datetime.datetime.strptime(temp_date, dateformat).strftime('%Y/%m/%d')
-            print(closing_date)
-        except:
-            print('passing for ' + temp_date)
-            pass
-    
-    csv_input = pd.read_csv(f)
-    csv_input.head()
-    csv_input['closing_date'] = closing_date
-    csv_input.head()
-    csv_input.to_csv(f, index=False, encoding='utf-8')
-
-extension = 'csv'
-all_filenames = [i for i in glob.glob(weekly_closing_dir_path + '/*.{}'.format(extension))]
-combined_csv = pd.concat([pd.read_csv(f) for f in all_filenames ])
-combined_csv.dropna(subset=['Item No_', 'Location Code']).to_csv(weekly_closing_output_path, index=False, encoding='utf-8')
-
-closing_stock_data = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(weekly_closing_output_path)
-
-# closing_stock_data = sqlContext.read.format("com.databricks.spark.csv").options(header='true', inferschema='true').load(data_path + 'closing_stock_data.csv')
-closing_stock_data.createOrReplaceTempView("closing_stock_raw")
-
-
-'''         
-for f in glob.glob(path):
-    print (f)
-'''
-    
-## Aggregate duplicate closing tock file by item_no,location_code,closing_date 
-
-###CASE WHEN to_date(closing_date, 'yyyy/MM/dd') = to_date('2019/03/31', 'yyyy/MM/dd')
-## THEN CONCAT('W01', '-FY', (year(date_sub(closing_date, 90))) % 100 + 1, year(date_sub(closing_date, 90)) % 100 + 2)
-## ELSE sdssdf END
-
-filepath = '/Users/parulgaba/Desktop/Capstone-Ethos/ethos-retail-model/data-engineering/ethos-load-to-pysql.py'
-"""
+# filepath = '/Users/parulgaba/Desktop/Capstone-Ethos/ethos-retail-model/data-engineering/ethos-load-to-pysql.py'
 
 dirpath = '/Users/parulgaba/Desktop/Capstone-Ethos/ConfidentialData/csvdata/'
 
@@ -243,7 +112,7 @@ sales_sql = '''select
      first(`State`) state,
      first(`Region`) region
 from sales_raw
-where `Date` is not null
+where `Date` is not null and cast(Quantity as int) >= 0 and cast(Quantity as int) < 2
 group by 1,2,3,4
 '''
 
@@ -274,7 +143,7 @@ select
      first(`State`) state,
      first(`Region`) region
 from sales3
-where `Date` is not null
+where `Date` is not null and cast(Quantity as int) >= 0 and cast(Quantity as int) < 2
 group by 1,2,3,4
 """
 
@@ -288,6 +157,7 @@ sales_3_data.createOrReplaceTempView("sales_3")
 sales_table = sales_table.unionAll(sales_3_data)
 
 sales_table.createOrReplaceTempView("sales")
+
 
 
 purchase_sql = """select
@@ -479,7 +349,6 @@ sales_weekly_query = """select
  first(state) state,
  first(region) region
 from sales b
-where quantity < 2 and quantity > 0
 group by 1,2,3
 """
 sales_weekly = sqlContext.sql(sales_weekly_query)
@@ -858,8 +727,8 @@ sales_week = '''SELECT
 ethos_transaction_summary.filter('region is null or state is null').select('location_code').distinct().repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'no_state_code.csv', header = 'true')
 
 
-
-
+ethos_transaction_summary.filter("location_code == 'S28' and brand == 'B063'").select('item_no').distinct().count()
+ethos_transaction_summary.filter("location_code == 'S28'").select('item_no').distinct().count()
 """
 
 

@@ -29,7 +29,7 @@ period_aggregator = period_aggregator.withColumn("period",sf.floor(expr('row_num
 
 ethos_transaction_summary = ethos_transaction_summary.join(period_aggregator, on=['week','year', 'week_no'], how='left')
 
-
+ethos_transaction_summary = ethos_transaction_summary.na.fill(0)
 ethos_transaction_summary = ethos_transaction_summary.orderBy('year', 'week_no')
 
 ethos_transaction_summary.createOrReplaceTempView('ethos_transaction_summary')
@@ -92,7 +92,7 @@ aggregated_summary = sqlContext.sql(aggregated_summary_query)
 
 aggregated_summary.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'aggregated_summary_period_{0}_weeks.csv'.format(input_period), header='true')
 
-# print(aggregated_summary.filter('sales_quantity > 0').count())
+#print(aggregated_summary.filter('sales_quantity > 0').count())
 
 # print (aggregated_summary.count())
 
@@ -102,12 +102,12 @@ print('\n\n STORETYPE AGG, Summary for aggregation of {0} weeks'.format(str(inpu
 aggregated_summary_query_store_type = """select
  period,
  item_no,
- store_location,
+ state,
  store_type,
  first(brand) brand,
+ first(store_location) store_location,
  first(city_type) city_type,
  first(region) region,
- first(state) state,
  first(quantity) quantity,
  sum(purchase_quantity) purchase_quantity,
  sum(transfer_quantity) transfer_quantity,
@@ -148,7 +148,7 @@ aggregated_summary_query_store_type = """select
   first(watch_type) watch_type,
  first(area_code) area_code
 from ethos_transaction_summary
-group by item_no, period, store_type, store_location
+group by item_no, period, state, store_type
 """
 
 aggregated_summary_store_type = sqlContext.sql(aggregated_summary_query_store_type)
@@ -156,3 +156,9 @@ aggregated_summary_store_type = sqlContext.sql(aggregated_summary_query_store_ty
 aggregated_summary_store_type.repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'aggregated_summary_store_type_{0}_weeks.csv'.format(input_period), header='true')
 #print(aggregated_summary_store_type.filter('sales_quantity > 0').count())
 #print (aggregated_summary_store_type.count())
+
+
+ethos_transaction_summary.filter("week_no == 'W53' and year = 'FY1920' and available_quantity > 0 and location_code = 'S28'").repartition(1).write.format('com.databricks.spark.csv').save(data_path + 's28_stock.csv', header='true')
+
+
+ethos_transaction_summary.filter("state = 'ST12'").select('location_code', 'period', 'store_type').distinct().groupBy('period', 'store_type').agg({ 'location_code': 'count' }).repartition(1).write.format('com.databricks.spark.csv').save(data_path + 'stores_per_pd_per_store_type.csv', header='true')
